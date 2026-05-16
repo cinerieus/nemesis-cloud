@@ -2,9 +2,8 @@ name: Build image
 
 on:
   workflow_dispatch:
-  # Enable this later if you want regular rebuilds.
-  # schedule:
-  #   - cron: "0 3 * * 0"
+  schedule:
+    - cron: "0 3 * * 0"
 
 jobs:
   build:
