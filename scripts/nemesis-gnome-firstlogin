@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+state_dir="${HOME}/.local/state"
+done_file="${state_dir}/nemesis-gnome-firstlogin.done"
+
+mkdir -p "$state_dir"
+
+gsettings set org.gnome.shell enabled-extensions "['blur-my-shell@aunetx', 'no-overview@fthx', 'rounded-window-corners@fxgn', 'system-monitor@gnome-shell-extensions.gcampax.github.com', 'tilingshell@ferrarodomenico.com', 'user-theme@gnome-shell-extensions.gcampax.github.com']" || true
+gsettings set org.gnome.desktop.interface font-antialiasing "rgba" || true
+gsettings set org.gnome.mutter experimental-features "['scale-monitor-framebuffer', 'xwayland-native-scaling']" || true
+gsettings set org.gnome.desktop.interface color-scheme "prefer-dark" || true
+gsettings set org.gnome.desktop.interface accent-color "slate" || true
+gsettings set org.gnome.desktop.interface gtk-theme "adw-gtk3-dark" || true
+gsettings set org.gnome.desktop.interface cursor-theme "catppuccin-macchiato-lavender-cursors" || true
+gsettings set org.gnome.desktop.interface icon-theme "Papirus-Dark" || true
+gsettings set org.gnome.desktop.wm.preferences focus-mode "sloppy" || true
+gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'gb')]" || true
+gsettings set org.gnome.shell.extensions.user-theme name "Catppuccin-Macchiato-Custom" || true
+
+gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom2/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom3/']" || true
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ name "Terminal" || true
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ command "kitty" || true
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ binding "<Super>t" || true
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/ name "File Manager" || true
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/ command "thunar" || true
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/ binding "<Super>f" || true
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom2/ name "Launcher" || true
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom2/ command "wofi --show run" || true
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom2/ binding "<Super>r" || true
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom3/ name "Browser" || true
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom3/ command "firefox" || true
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom3/ binding "<Super>b" || true
+
+if [[ -f /usr/local/share/backgrounds/nemesis/background.png ]]; then
+  gsettings set org.gnome.desktop.background picture-uri "file:///usr/local/share/backgrounds/nemesis/background.png" || true
+  gsettings set org.gnome.desktop.background picture-uri-dark "file:///usr/local/share/backgrounds/nemesis/background.png" || true
+  gsettings set org.gnome.desktop.background picture-options "zoom" || true
+fi
+
+if command -v xrdb >/dev/null 2>&1 && [[ -f "${HOME}/.Xresources" ]]; then
+  xrdb -merge "${HOME}/.Xresources" || true
+fi
+
+touch "$done_file"
+systemctl --user disable nemesis-gnome-firstlogin.service >/dev/null 2>&1 || true

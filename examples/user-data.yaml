@@ -1,0 +1,22 @@
+#cloud-config
+#
+# Example runtime user-data for VMs created from the Nemesis base image.
+# Cockpit, DigitalOcean, Vultr, or another cloud platform can provide equivalent
+# user-data at VM creation time.
+
+preserve_hostname: false
+ssh_pwauth: false
+
+chpasswd:
+  expire: false
+  users:
+    - name: user
+      password: Ch4ngeM3!
+      type: text
+
+ssh_authorized_keys:
+  - ssh-ed25519 REPLACE_WITH_YOUR_PUBLIC_KEY
+
+runcmd:
+  - [bash, -lc, "systemctl enable --now gdm.service gnome-remote-desktop.service"]
+  - [bash, -lc, 'hostnamectl set-hostname "DESKTOP-$(tr -dc A-Z0-9 </dev/urandom | head -c 7)" || true']

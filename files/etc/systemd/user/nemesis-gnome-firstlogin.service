@@ -1,0 +1,11 @@
+[Unit]
+Description=Apply Nemesis GNOME user settings
+After=graphical-session.target
+ConditionPathExists=!%h/.local/state/nemesis-gnome-firstlogin.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nemesis-gnome-firstlogin
+
+[Install]
+WantedBy=default.target

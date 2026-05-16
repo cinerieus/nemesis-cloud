@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+install_dir="/usr/local/share/nemesis-cloud"
+config_file="/etc/nemesis-cloud.conf"
+log_file="/var/log/nemesis-firstboot.log"
+
+if [[ "${EUID}" -ne 0 ]]; then
+  exec sudo bash "$0" "$@"
+fi
+
+usage() {
+  cat <<'EOF'
+Usage: ./init.sh [options]
+
+Options:
+  --user NAME              Target user to configure. Default: user
+  --hostname NAME          Hostname. Empty/default generates DESKTOP-XXXXXXX.
+  --password PASSWORD      Initial console password for target user. Default: Ch4ngeM3!
+  --repo-url URL           Repo URL used for large assets on future runs.
+  --repo-ref REF           Repo branch/ref. Default: main
+  --enable-desktop-login   Enable GDM and GNOME Remote Desktop services.
+  --luks-note             Write first-boot LUKS guidance note.
+  --ssh-key KEY            Authorized SSH public key for target user.
+  --rdp-user NAME          Initial GNOME RDP user. Default: rdp
+  --rdp-password PASSWORD  Initial GNOME RDP password. Default: rdp
+  --force-config          Overwrite /etc/nemesis-cloud.conf.
+  --install-only          Install files and write config, but do not run.
+  -h, --help              Show this help.
+EOF
+}
+
+nemesis_user="user"
+nemesis_hostname=""
+nemesis_user_password="Ch4ngeM3!"
+enable_graphical_login="false"
+enable_luks_note="false"
+nemesis_repo_url=""
+nemesis_repo_ref="main"
+ssh_authorized_key=""
+rdp_user="rdp"
+rdp_password="rdp"
+force_config="false"
+install_only="false"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --user)
+      nemesis_user="$2"
+      shift 2
+      ;;
+    --hostname)
+      nemesis_hostname="$2"
+      shift 2
+      ;;
+    --password)
+      nemesis_user_password="$2"
+      shift 2
+      ;;
+    --repo-url)
+      nemesis_repo_url="$2"
+      shift 2
+      ;;
+    --repo-ref)
+      nemesis_repo_ref="$2"
+      shift 2
+      ;;
+    --enable-desktop-login)
+      enable_graphical_login="true"
+      shift
+      ;;
+    --luks-note)
+      enable_luks_note="true"
+      shift
+      ;;
+    --ssh-key)
+      ssh_authorized_key="$2"
+      shift 2
+      ;;
+    --rdp-user)
+      rdp_user="$2"
+      shift 2
+      ;;
+    --rdp-password)
+      rdp_password="$2"
+      shift 2
+      ;;
+    --force-config)
+      force_config="true"
+      shift
+      ;;
+    --install-only)
+      install_only="true"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+quote_shell() {
+  printf "%q" "$1"
+}
+
+write_config() {
+  if [[ -f "$config_file" && "$force_config" != "true" ]]; then
+    echo "Keeping existing $config_file. Use --force-config to overwrite it."
+    return 0
+  fi
+
+  install -d -m0755 /etc
+  cat >"$config_file" <<EOF
+NEMESIS_USER=$(quote_shell "$nemesis_user")
+NEMESIS_HOSTNAME=$(quote_shell "$nemesis_hostname")
+NEMESIS_USER_PASSWORD=$(quote_shell "$nemesis_user_password")
+ENABLE_GRAPHICAL_LOGIN=$(quote_shell "$enable_graphical_login")
+ENABLE_LUKS_NOTE=$(quote_shell "$enable_luks_note")
+NEMESIS_REPO_URL=$(quote_shell "$nemesis_repo_url")
+NEMESIS_REPO_REF=$(quote_shell "$nemesis_repo_ref")
+SSH_AUTHORIZED_KEY=$(quote_shell "$ssh_authorized_key")
+RDP_USER=$(quote_shell "$rdp_user")
+RDP_PASSWORD=$(quote_shell "$rdp_password")
+EOF
+
+  chmod 0600 "$config_file"
+}
+
+install_project() {
+  install -d -m0755 "$install_dir"
+  cp -a --no-preserve=ownership "$repo_dir/scripts" "$install_dir/"
+  cp -a --no-preserve=ownership "$repo_dir/files" "$install_dir/"
+
+  if [[ -d "$repo_dir/assets" ]]; then
+    cp -a --no-preserve=ownership "$repo_dir/assets" "$install_dir/"
+  fi
+
+  chown -R root:root "$install_dir"
+  chmod 0755 "$install_dir/scripts/nemesis-firstboot"
+  chmod 0755 "$install_dir/scripts/nemesis-gnome-firstlogin"
+  chmod 0755 "$install_dir/scripts/nemesis-workspace"
+}
+
+install_project
+write_config
+
+if [[ "$install_only" == "true" ]]; then
+  echo "Installed Nemesis files to $install_dir and wrote $config_file."
+  exit 0
+fi
+
+bash -lc "'$install_dir/scripts/nemesis-firstboot' 2>&1 | tee '$log_file'"

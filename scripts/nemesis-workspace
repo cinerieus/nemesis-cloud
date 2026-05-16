@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+container="/opt/workspace.luks"
+mountpoint="/opt/workspace"
+mapper_name="nemesis-workspace"
+owner_group="users"
+default_size="20G"
+
+usage() {
+  cat <<'EOF'
+Usage: nemesis-workspace COMMAND [options]
+
+Commands:
+  init [--size SIZE]   Create encrypted /opt/workspace container.
+  open                 Unlock and mount encrypted workspace.
+  close                Unmount and lock encrypted workspace.
+  status               Show workspace status.
+
+Examples:
+  sudo nemesis-workspace init --size 50G
+  sudo nemesis-workspace open
+  sudo nemesis-workspace close
+EOF
+}
+
+need_root() {
+  if [[ "${EUID}" -ne 0 ]]; then
+    exec sudo "$0" "$@"
+  fi
+}
+
+mapper_path() {
+  printf '/dev/mapper/%s\n' "$mapper_name"
+}
+
+workspace_permissions() {
+  mkdir -p "$mountpoint"
+  chgrp "$owner_group" "$mountpoint"
+  chmod 2775 "$mountpoint"
+  setfacl -Rdm g:"$owner_group":rwx "$mountpoint" || true
+}
+
+open_workspace() {
+  if [[ ! -f "$container" ]]; then
+    echo "$container does not exist. Run: sudo nemesis-workspace init" >&2
+    exit 1
+  fi
+
+  if [[ ! -e "$(mapper_path)" ]]; then
+    cryptsetup open "$container" "$mapper_name"
+  fi
+
+  mkdir -p "$mountpoint"
+  if ! findmnt "$mountpoint" >/dev/null 2>&1; then
+    mount "$(mapper_path)" "$mountpoint"
+  fi
+
+  workspace_permissions
+}
+
+close_workspace() {
+  if findmnt "$mountpoint" >/dev/null 2>&1; then
+    umount "$mountpoint"
+  fi
+
+  if [[ -e "$(mapper_path)" ]]; then
+    cryptsetup close "$mapper_name"
+  fi
+}
+
+status_workspace() {
+  if [[ -f "$container" ]]; then
+    echo "container: $container"
+  else
+    echo "container: missing"
+  fi
+
+  if [[ -e "$(mapper_path)" ]]; then
+    echo "mapper: open"
+  else
+    echo "mapper: closed"
+  fi
+
+  if findmnt "$mountpoint" >/dev/null 2>&1; then
+    echo "mount: mounted at $mountpoint"
+  else
+    echo "mount: not mounted"
+  fi
+}
+
+init_workspace() {
+  local size="$default_size"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --size)
+        size="$2"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        echo "Unknown option: $1" >&2
+        usage >&2
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ -f "$container" ]]; then
+    echo "$container already exists. Use 'nemesis-workspace open'." >&2
+    exit 1
+  fi
+
+  local backup=""
+  if [[ -d "$mountpoint" && -n "$(find "$mountpoint" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    backup="/opt/workspace.pre-encryption.$(date +%Y%m%d%H%M%S)"
+    mv "$mountpoint" "$backup"
+  fi
+
+  truncate -s "$size" "$container"
+  chmod 0600 "$container"
+  cryptsetup luksFormat "$container"
+  cryptsetup open "$container" "$mapper_name"
+  mkfs.ext4 -F "$(mapper_path)"
+
+  mkdir -p "$mountpoint"
+  mount "$(mapper_path)" "$mountpoint"
+
+  if [[ -n "$backup" ]]; then
+    cp -a "$backup"/. "$mountpoint"/
+  fi
+
+  workspace_permissions
+
+  echo "Encrypted workspace mounted at $mountpoint."
+  echo "Use 'sudo nemesis-workspace open' after reboot, and 'sudo nemesis-workspace close' to lock it."
+}
+
+need_root "$@"
+
+command="${1:-}"
+shift || true
+
+case "$command" in
+  init)
+    init_workspace "$@"
+    ;;
+  open)
+    open_workspace
+    ;;
+  close)
+    close_workspace
+    ;;
+  status)
+    status_workspace
+    ;;
+  -h|--help|"")
+    usage
+    ;;
+  *)
+    echo "Unknown command: $command" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

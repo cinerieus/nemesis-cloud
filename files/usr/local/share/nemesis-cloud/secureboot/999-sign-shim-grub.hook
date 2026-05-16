@@ -1,0 +1,15 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = linux
+Target = linux-lts
+Target = linux-hardened
+Target = linux-zen
+Target = grub
+
+[Action]
+Description = Signing shim/GRUB Secure Boot files
+When = PostTransaction
+Exec = /usr/local/sbin/sign-shim-grub
+Depends = sbsigntools

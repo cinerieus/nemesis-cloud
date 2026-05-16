@@ -1,0 +1,53 @@
+[org/gnome/desktop/interface]
+font-antialiasing='rgba'
+color-scheme='prefer-dark'
+accent-color='slate'
+gtk-theme='adw-gtk3-dark'
+cursor-theme='catppuccin-macchiato-lavender-cursors'
+icon-theme='Papirus-Dark'
+
+[org/gnome/desktop/wm/preferences]
+focus-mode='sloppy'
+
+[org/gnome/desktop/input-sources]
+sources=[('xkb', 'gb')]
+
+[org/gnome/mutter]
+experimental-features=['scale-monitor-framebuffer', 'xwayland-native-scaling']
+
+[org/gnome/desktop/session]
+idle-delay=uint32 0
+
+[org/gnome/desktop/background]
+picture-uri='file:///usr/local/share/backgrounds/nemesis/background.png'
+picture-uri-dark='file:///usr/local/share/backgrounds/nemesis/background.png'
+picture-options='zoom'
+
+[org/gnome/login-screen]
+logo=''
+
+[org/gnome/shell/extensions/user-theme]
+name='Catppuccin-Macchiato-Custom'
+
+[org/gnome/settings-daemon/plugins/media-keys]
+custom-keybindings=['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom2/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom3/']
+
+[org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0]
+name='Terminal'
+command='kitty'
+binding='<Super>t'
+
+[org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1]
+name='File Manager'
+command='thunar'
+binding='<Super>f'
+
+[org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom2]
+name='Launcher'
+command='wofi --show run'
+binding='<Super>r'
+
+[org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom3]
+name='Browser'
+command='firefox'
+binding='<Super>b'

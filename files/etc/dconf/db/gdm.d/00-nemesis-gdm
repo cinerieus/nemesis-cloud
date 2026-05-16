@@ -1,0 +1,6 @@
+[org/gnome/login-screen]
+logo=''
+
+[org/gnome/desktop/interface]
+cursor-theme='catppuccin-macchiato-lavender-cursors'
+icon-theme='Papirus-Dark'

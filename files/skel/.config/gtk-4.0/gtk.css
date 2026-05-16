@@ -1,0 +1,17 @@
+@define-color accent_color #b4befe;
+@define-color accent_bg_color #b4befe;
+@define-color accent_fg_color #1e1e2e;
+
+*:selected,
+selection,
+*:selected:focus {
+  background-color: @accent_bg_color;
+  color: @accent_fg_color;
+}
+
+switch:checked,
+checkbutton check:checked,
+radiobutton radio:checked {
+  background-color: @accent_bg_color;
+  border-color: @accent_bg_color;
+}

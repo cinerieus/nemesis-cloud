@@ -1,0 +1,795 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+source /etc/nemesis-cloud.conf
+export TERM="${TERM:-xterm-256color}"
+
+repo_root="/usr/local/share/nemesis-cloud"
+asset_root="$repo_root/assets"
+
+log() {
+  printf '\n==> %s\n' "$*"
+}
+
+as_user() {
+  sudo -Hu "$NEMESIS_USER" "$@"
+}
+
+pacman_install() {
+  pacman --noconfirm --needed -S "$@"
+}
+
+retry() {
+  local attempts="${RETRY_ATTEMPTS:-5}"
+  local delay="${RETRY_DELAY:-5}"
+  local n=1
+
+  until "$@"; do
+    if (( n >= attempts )); then
+      return 1
+    fi
+
+    echo "Command failed, retrying in ${delay}s (${n}/${attempts}): $*" >&2
+    sleep "$delay"
+    n=$((n + 1))
+  done
+}
+
+curl_fetch() {
+  retry curl --retry 5 --retry-delay 3 --retry-all-errors -fsSL "$@"
+}
+
+git_clone_retry() {
+  retry git clone "$@"
+}
+
+pacman_install_optional() {
+  pacman --noconfirm --needed -S "$@" || true
+}
+
+install_noto_nerd_font() {
+  pacman --noconfirm --needed -S ttf-noto-nerd || \
+    pacman --noconfirm --needed -S nerd-fonts-noto || true
+}
+
+is_first_boot() {
+  [[ ! -e /var/lib/cloud/instance/boot-finished ]]
+}
+
+resolve_hostname() {
+  if [[ -n "${NEMESIS_HOSTNAME}" ]]; then
+    printf '%s\n' "$NEMESIS_HOSTNAME"
+    return 0
+  fi
+
+  printf 'DESKTOP-%s\n' "$(/usr/bin/tr -dc A-Z0-9 </dev/urandom | /usr/bin/head -c 7)"
+}
+
+set_system_hostname() {
+  local hostname
+  hostname="$(resolve_hostname)"
+  if ! hostnamectl set-hostname "$hostname"; then
+    hostnamectl --transient set-hostname "$hostname" || true
+  fi
+
+  printf '%s\n' "$hostname" >/etc/hostname 2>/dev/null || true
+
+  if grep -qE '^127\.0\.1\.1[[:space:]]+' /etc/hosts; then
+    sed -i -E "s/^127\.0\.1\.1[[:space:]].*/127.0.1.1 ${hostname}/" /etc/hosts || true
+  else
+    printf '127.0.1.1 %s\n' "$hostname" >>/etc/hosts 2>/dev/null || true
+  fi
+
+  NEMESIS_HOSTNAME="$hostname"
+}
+
+install_tree() {
+  local source="$1"
+  local target="$2"
+
+  if [[ -d "$source" ]]; then
+    mkdir -p "$target"
+    cp -a --no-preserve=ownership "$source"/. "$target"/.
+  fi
+}
+
+prepare_repo_assets() {
+  if [[ -z "${NEMESIS_REPO_URL:-}" ]]; then
+    return 0
+  fi
+
+  local checkout="/opt/nemesis-cloud"
+  if [[ ! -d "$checkout/.git" ]]; then
+    rm -rf "$checkout"
+    git_clone_retry --branch "${NEMESIS_REPO_REF:-main}" --depth 1 "$NEMESIS_REPO_URL" "$checkout" || return 0
+  else
+    git -C "$checkout" fetch --depth 1 origin "${NEMESIS_REPO_REF:-main}" || true
+    git -C "$checkout" checkout FETCH_HEAD || true
+  fi
+
+  if [[ -d "$checkout/assets" ]]; then
+    asset_root="$checkout/assets"
+  fi
+}
+
+asset_or_download() {
+  local relative="$1"
+  local url="$2"
+  local destination="$3"
+
+  if [[ -f "$asset_root/$relative" ]]; then
+    install -m0644 "$asset_root/$relative" "$destination"
+  else
+    curl_fetch "$url" -o "$destination"
+  fi
+}
+
+install_repo_files() {
+  log "Installing repo-backed configuration files"
+
+  install_tree "$repo_root/files/etc" /etc
+  install_tree "$repo_root/files/skel" /etc/skel
+
+  install -Dm0755 "$repo_root/scripts/nemesis-gnome-firstlogin" /usr/local/bin/nemesis-gnome-firstlogin
+  install -Dm0755 "$repo_root/scripts/nemesis-workspace" /usr/local/bin/nemesis-workspace
+
+  if [[ -d "/home/$NEMESIS_USER" ]]; then
+    install_tree "$repo_root/files/skel" "/home/$NEMESIS_USER"
+    chown -R "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER"
+  fi
+
+  install_tree "$repo_root/files/skel" /root
+
+  chmod 0440 /etc/sudoers.d/10-wheel
+  chown root:root /etc/sudoers.d
+  chown root:root /etc/sudoers.d/10-wheel
+  chmod 0644 /etc/systemd/resolved.conf.d/10-nemesis.conf
+  chmod 0644 /etc/NetworkManager/conf.d/10-dns-systemd-resolved.conf
+  chmod 0644 /etc/NetworkManager/conf.d/20-connectivity.conf
+  if command -v dconf >/dev/null 2>&1; then
+    dconf update || true
+  fi
+}
+
+install_yay() {
+  if command -v yay >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local build_dir="/tmp/yay-bin"
+  rm -rf "$build_dir"
+  as_user bash -lc "retry() { local n=1; until \"\$@\"; do if (( n >= 5 )); then return 1; fi; sleep 5; n=\$((n + 1)); done; }; retry git clone https://aur.archlinux.org/yay-bin.git '$build_dir'"
+  with_aur_pacman_sudo as_user bash -lc "cd '$build_dir' && makepkg --noconfirm -s"
+  pacman --noconfirm -U "$build_dir"/yay-bin-*.pkg.tar.*
+  rm -rf "$build_dir"
+}
+
+with_aur_pacman_sudo() {
+  local sudoers_file="/etc/sudoers.d/90-nemesis-aur-pacman"
+  local status
+
+  printf '%s ALL=(root) NOPASSWD: /usr/bin/pacman\n' "$NEMESIS_USER" >"$sudoers_file"
+  chown root:root "$sudoers_file"
+  chmod 0440 "$sudoers_file"
+
+  set +e
+  "$@"
+  status=$?
+  set -e
+
+  rm -f "$sudoers_file"
+  return "$status"
+}
+
+install_aur() {
+  local package
+  for package in "$@"; do
+    install_aur_package "$package"
+  done
+}
+
+install_aur_optional() {
+  local package
+
+  for package in "$@"; do
+    install_aur_package "$package" || true
+  done
+}
+
+install_aur_package() {
+  local package="$1"
+
+  if pacman -Qi "$package" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  install_yay
+  with_aur_pacman_sudo as_user yay --noconfirm --needed -S "$package"
+}
+
+configure_base() {
+  log "Configuring base system"
+
+  set_system_hostname
+  timedatectl set-timezone UTC
+  timedatectl set-ntp true
+
+  cat >/etc/locale.gen <<'EOF'
+C.UTF-8 UTF-8
+en_US.UTF-8 UTF-8
+en_GB.UTF-8 UTF-8
+EOF
+  locale-gen
+  printf 'LANG=en_GB.UTF-8\n' >/etc/locale.conf
+  export LANG=en_GB.UTF-8
+  cat >/etc/vconsole.conf <<'EOF'
+KEYMAP=uk
+FONT=Goha-16
+EOF
+
+  if ! id "$NEMESIS_USER" >/dev/null 2>&1; then
+    useradd -m -G users,wheel -s /bin/bash "$NEMESIS_USER"
+  fi
+
+  if [[ -n "${NEMESIS_USER_PASSWORD:-}" ]]; then
+    printf '%s:%s\n' "$NEMESIS_USER" "$NEMESIS_USER_PASSWORD" | chpasswd
+    passwd -u "$NEMESIS_USER" >/dev/null 2>&1 || true
+  fi
+
+  mkdir -p /opt/workspace
+  chgrp users /opt/workspace
+  chmod 2775 /opt/workspace
+  setfacl -Rdm g:users:rwx /opt/workspace
+
+  if [[ -n "${SSH_AUTHORIZED_KEY}" ]]; then
+    install -d -m 0750 -o "$NEMESIS_USER" -g "$NEMESIS_USER" "/home/$NEMESIS_USER/.ssh"
+    printf '%s\n' "$SSH_AUTHORIZED_KEY" >"/home/$NEMESIS_USER/.ssh/authorized_keys"
+    chown "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER/.ssh/authorized_keys"
+    chmod 0600 "/home/$NEMESIS_USER/.ssh/authorized_keys"
+  fi
+}
+
+configure_networking() {
+  log "Configuring systemd networking services"
+
+  systemctl enable --now systemd-timesyncd.service
+  systemctl enable --now systemd-resolved.service
+  ln -sfn /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+
+  systemctl disable --now systemd-networkd.service >/dev/null 2>&1 || true
+  systemctl enable --now NetworkManager.service
+
+  systemctl enable sshd.service
+}
+
+configure_repos() {
+  log "Configuring repositories"
+
+  if ! grep -q '^\[multilib\]' /etc/pacman.conf; then
+    cat >>/etc/pacman.conf <<'EOF'
+
+[multilib]
+Include = /etc/pacman.d/mirrorlist
+EOF
+  fi
+
+  export TERM=xterm-256color
+  curl_fetch https://blackarch.org/strap.sh -o /tmp/blackarch-strap.sh
+  chmod +x /tmp/blackarch-strap.sh
+  /tmp/blackarch-strap.sh
+  printf 'Server = https://blackarch.org/blackarch/blackarch/os/x86_64\n' >/etc/pacman.d/blackarch-mirrorlist
+
+  pacman --noconfirm -Syu
+}
+
+configure_bootstrap_packages() {
+  log "Installing bootstrap packages"
+
+  pacman --noconfirm --needed -Sy sudo git curl base-devel
+}
+
+configure_core_packages() {
+  log "Installing core packages"
+
+  pacman_install \
+    sudo \
+    base-devel \
+    git \
+    curl \
+    wget \
+    openssh \
+    cloud-init \
+    neovim \
+    tmux \
+    p7zip \
+    noto-fonts \
+    fish \
+    less \
+    ldns \
+    lvm2 \
+    cryptsetup \
+    efibootmgr \
+    grub \
+    mokutil \
+    openssl \
+    sbsigntools \
+    networkmanager \
+    systemd-resolvconf \
+    acl \
+    socat \
+    proxychains-ng \
+    nmap \
+    impacket \
+    metasploit \
+    sqlmap \
+    john \
+    hashcat \
+    medusa \
+    ffuf \
+    seclists \
+    binwalk \
+    netexec \
+    responder \
+    certipy \
+    bloodyad \
+    httpx \
+    dnsx \
+    nuclei \
+    subfinder \
+    katana-pd \
+    strace
+}
+
+configure_mkinitcpio_for_luks() {
+  if [[ "${ENABLE_LUKS_NOTE}" != "true" ]]; then
+    return 0
+  fi
+
+  if ! is_first_boot; then
+    echo "Skipping LUKS first-boot note: cloud-init first boot has already completed"
+    return 0
+  fi
+
+  log "Recording LUKS guidance"
+  cat >/root/NEMESIS-LUKS-NOTE.txt <<'EOF'
+Root LUKS encryption should be created before first boot, during image
+build or OS installation. This cloud-config does not repartition or
+encrypt the mounted root filesystem.
+
+For Arch with systemd initramfs, prefer sd-encrypt and GRUB:
+  HOOKS=(base systemd autodetect keyboard sd-vconsole modconf block sd-encrypt lvm2 filesystems fsck)
+
+Then add the correct cryptdevice/rd.luks and root entries to /etc/default/grub
+and regenerate /boot/grub/grub.cfg.
+EOF
+}
+
+configure_grub_shim_secure_boot() {
+  log "Configuring shim-signed GRUB Secure Boot path"
+
+  local esp
+  if ! esp="$(ensure_esp_mounted)"; then
+    echo "Skipping shim/GRUB setup: no mounted EFI system partition found"
+    return 0
+  fi
+
+  install_aur_package shim-signed
+
+  cat >/etc/default/grub <<'EOF'
+GRUB_DISTRIBUTOR="Arch Nemesis"
+GRUB_CMDLINE_LINUX_DEFAULT=""
+GRUB_CMDLINE_LINUX=""
+GRUB_DISABLE_OS_PROBER=false
+GRUB_ENABLE_CRYPTODISK=y
+EOF
+
+  local grub_modules
+  grub_modules="all_video boot btrfs cat chain configfile echo efifwsetup efinet ext2 fat font gettext gfxmenu gfxterm gfxterm_background gzio halt help hfsplus iso9660 jpeg keystatus loadenv loopback linux ls lsefi lsefimmap lsefisystab lssal memdisk minicmd normal ntfs part_apple part_msdos part_gpt password_pbkdf2 png probe reboot regexp search search_fs_uuid search_fs_file search_label sleep smbios test true video xfs zfs zfscrypt zfsinfo play cpuid tpm luks lvm"
+
+  grub-install \
+    --removable \
+    --target=x86_64-efi \
+    --efi-directory="$esp" \
+    --bootloader-id=GRUB \
+    --sbat=/usr/share/grub/sbat.csv \
+    --modules="$grub_modules" || \
+  grub-install \
+    --removable \
+    --target=x86_64-efi \
+    --efi-directory="$esp" \
+    --bootloader-id=GRUB \
+    --modules="$grub_modules"
+
+  mkdir -p "$esp/EFI/BOOT"
+  if [[ -f "$esp/EFI/BOOT/BOOTX64.EFI" ]]; then
+    mv -f "$esp/EFI/BOOT/BOOTX64.EFI" "$esp/EFI/BOOT/grubx64.efi"
+  elif [[ -f "$esp/EFI/BOOT/BOOTx64.EFI" ]]; then
+    mv -f "$esp/EFI/BOOT/BOOTx64.EFI" "$esp/EFI/BOOT/grubx64.efi"
+  fi
+
+  install -m0644 /usr/share/shim-signed/shimx64.efi "$esp/EFI/BOOT/BOOTX64.EFI"
+  install -m0644 /usr/share/shim-signed/mmx64.efi "$esp/EFI/BOOT/mmx64.efi"
+
+  configure_mok_signing "$esp"
+  configure_grub_theme
+
+  grub-mkconfig -o /boot/grub/grub.cfg
+
+  cat >/root/NEMESIS-SECURE-BOOT-NOTE.txt <<'EOF'
+Secure Boot is configured with Microsoft-signed shim, GRUB, and a local MOK.
+
+On the first Secure Boot start, MokManager should appear. Enroll:
+  MOK.cer from the EFI system partition
+
+After enrollment and a successful boot, remove:
+  MOK.cer from the EFI system partition
+  EFI/BOOT/mmx64.efi from the EFI system partition
+
+The private key is stored root-only under:
+  /etc/secureboot/mok
+EOF
+}
+
+ensure_esp_mounted() {
+  if findmnt /boot >/dev/null 2>&1 && [[ -d /boot/EFI ]]; then
+    printf '/boot\n'
+    return 0
+  fi
+
+  if findmnt /efi >/dev/null 2>&1 && [[ -d /efi/EFI ]]; then
+    printf '/efi\n'
+    return 0
+  fi
+
+  mkdir -p /efi
+
+  local name fstype parttype
+  while read -r name fstype parttype; do
+    if [[ "$fstype" == "vfat" || "${parttype,,}" == "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" ]]; then
+      if mount "$name" /efi; then
+        mkdir -p /efi/EFI
+        printf '/efi\n'
+        return 0
+      fi
+    fi
+  done < <(lsblk -rpno NAME,FSTYPE,PARTTYPE)
+
+  return 1
+}
+
+configure_mok_signing() {
+  local esp="$1"
+  local key_dir="/etc/secureboot/mok"
+
+  install -d -m0700 "$key_dir"
+
+  if [[ ! -f "$key_dir/MOK.key" || ! -f "$key_dir/MOK.crt" ]]; then
+    openssl req \
+      -newkey rsa:4096 \
+      -nodes \
+      -keyout "$key_dir/MOK.key" \
+      -new \
+      -x509 \
+      -sha256 \
+      -days 3650 \
+      -subj "/CN=Nemesis MOK/" \
+      -out "$key_dir/MOK.crt"
+    openssl x509 -outform DER -in "$key_dir/MOK.crt" -out "$key_dir/MOK.cer"
+  fi
+
+  chmod 0600 "$key_dir"/MOK.*
+
+  install -m0644 "$key_dir/MOK.cer" "$esp/MOK.cer"
+  install -m0644 "$key_dir/MOK.cer" /boot/MOK.cer || true
+
+  sign_secure_boot_file /boot/vmlinuz-linux
+  sign_secure_boot_file "$esp/EFI/BOOT/grubx64.efi"
+
+  install -Dm0644 \
+    "$repo_root/files/usr/local/share/nemesis-cloud/secureboot/999-sign-shim-grub.hook" \
+    /etc/pacman.d/hooks/999-sign-shim-grub.hook
+  install -Dm0755 \
+    "$repo_root/files/usr/local/share/nemesis-cloud/secureboot/sign-shim-grub" \
+    /usr/local/sbin/sign-shim-grub
+}
+
+sign_secure_boot_file() {
+  local file="$1"
+  local key_dir="/etc/secureboot/mok"
+  local signed
+
+  if [[ ! -f "$file" ]]; then
+    return 0
+  fi
+
+  signed="$(mktemp)"
+  if sbsign --key "$key_dir/MOK.key" --cert "$key_dir/MOK.crt" --output "$signed" "$file"; then
+    install -m0644 "$signed" "$file"
+  fi
+  rm -f "$signed"
+}
+
+configure_grub_theme() {
+  mkdir -p /boot/grub/themes
+
+  asset_or_download \
+    "grub/theme-grub-catppuccin.zip" \
+    "https://raw.githubusercontent.com/cinerieus/nemesisv2/refs/heads/main/config/theme-grub-catppuccin.zip" \
+    /boot/grub/themes/theme-grub-catppuccin.zip
+
+  7z x /boot/grub/themes/theme-grub-catppuccin.zip -o/boot/grub/themes || true
+  rm -f /boot/grub/themes/theme-grub-catppuccin.zip
+
+  if [[ -f /boot/grub/themes/catppuccin-macchiato-grub-theme/theme.txt ]]; then
+    cat >>/etc/default/grub <<'EOF'
+GRUB_THEME=/boot/grub/themes/catppuccin-macchiato-grub-theme/theme.txt
+EOF
+  fi
+}
+
+configure_cli_customization() {
+  log "Configuring CLI tools"
+
+  install -d -o "$NEMESIS_USER" -g "$NEMESIS_USER" \
+    "/home/$NEMESIS_USER/.cache" \
+    "/home/$NEMESIS_USER/.config" \
+    "/home/$NEMESIS_USER/.local"
+  chown -R "$NEMESIS_USER:$NEMESIS_USER" \
+    "/home/$NEMESIS_USER/.cache" \
+    "/home/$NEMESIS_USER/.config" \
+    "/home/$NEMESIS_USER/.local"
+
+  as_user curl --retry 5 --retry-delay 3 --retry-all-errors -fsSL https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim \
+    -o "/home/$NEMESIS_USER/.local/share/nvim/site/autoload/plug.vim" --create-dirs
+  install -d -o "$NEMESIS_USER" -g "$NEMESIS_USER" "/home/$NEMESIS_USER/.cache/nemesis"
+  cat >"/home/$NEMESIS_USER/.cache/nemesis/init-plugin-bootstrap.vim" <<'EOF'
+call plug#begin('~/.vim/plugged')
+Plug 'catppuccin/nvim', { 'as': 'catppuccin' }
+Plug 'itchyny/lightline.vim'
+call plug#end()
+EOF
+  chown "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER/.cache/nemesis/init-plugin-bootstrap.vim"
+  as_user nvim -u "/home/$NEMESIS_USER/.cache/nemesis/init-plugin-bootstrap.vim" +PlugInstall +qa || true
+  install -Dm0644 "/home/$NEMESIS_USER/.local/share/nvim/site/autoload/plug.vim" \
+    /root/.local/share/nvim/site/autoload/plug.vim
+  install -d /root/.cache/nemesis
+  cat >/root/.cache/nemesis/init-plugin-bootstrap.vim <<'EOF'
+call plug#begin('~/.vim/plugged')
+Plug 'catppuccin/nvim', { 'as': 'catppuccin' }
+Plug 'itchyny/lightline.vim'
+call plug#end()
+EOF
+  nvim -u /root/.cache/nemesis/init-plugin-bootstrap.vim +PlugInstall +qa || true
+
+  as_user git clone https://github.com/tmux-plugins/tpm "/home/$NEMESIS_USER/.tmux/plugins/tpm" || true
+  as_user "/home/$NEMESIS_USER/.tmux/plugins/tpm/scripts/install_plugins.sh" || true
+  git clone https://github.com/tmux-plugins/tpm /root/.tmux/plugins/tpm || true
+  /root/.tmux/plugins/tpm/scripts/install_plugins.sh || true
+
+  as_user curl --retry 5 --retry-delay 3 --retry-all-errors -fsSL https://raw.githubusercontent.com/oh-my-fish/oh-my-fish/master/bin/install \
+    -o "/home/$NEMESIS_USER/install.fish"
+  as_user env \
+    XDG_CACHE_HOME="/home/$NEMESIS_USER/.cache" \
+    XDG_CONFIG_HOME="/home/$NEMESIS_USER/.config" \
+    XDG_DATA_HOME="/home/$NEMESIS_USER/.local/share" \
+    fish "/home/$NEMESIS_USER/install.fish" --noninteractive || true
+  rm -f "/home/$NEMESIS_USER/install.fish"
+  as_user git clone https://github.com/cinerieus/theme-sushi.git \
+    "/home/$NEMESIS_USER/.local/share/omf/themes/sushi" || true
+  as_user env \
+    XDG_CACHE_HOME="/home/$NEMESIS_USER/.cache" \
+    XDG_CONFIG_HOME="/home/$NEMESIS_USER/.config" \
+    XDG_DATA_HOME="/home/$NEMESIS_USER/.local/share" \
+    fish -c "omf theme sushi" || true
+  curl_fetch https://raw.githubusercontent.com/oh-my-fish/oh-my-fish/master/bin/install \
+    -o /root/install.fish
+  fish /root/install.fish --noninteractive || true
+  rm -f /root/install.fish
+  mkdir -p /root/.local/share/omf/themes
+  cp -a "/home/$NEMESIS_USER/.local/share/omf/themes/sushi" /root/.local/share/omf/themes/ || true
+  fish -c "omf theme sushi" || true
+
+  usermod -s /bin/fish "$NEMESIS_USER"
+  usermod -s /bin/fish root
+
+  install_noto_nerd_font
+}
+
+configure_desktop() {
+  log "Installing GNOME desktop"
+  pacman_install gnome vulkan-intel firefox libreoffice kitty thunar wofi pipewire-libcamera glib2-devel dbus imagemagick
+
+  install_aur_optional \
+    gnome-shell-extension-blur-my-shell \
+    gnome-shell-extension-tilingshell \
+    gnome-shell-extension-no-overview \
+    gnome-shell-extension-rounded-window-corners-reborn-git \
+    catppuccin-cursors-macchiato \
+    papirus-icon-theme \
+    papirus-folders-catppuccin-git \
+    adw-gtk-theme
+
+  configure_theme
+  configure_rdp
+
+  if [[ "${ENABLE_GRAPHICAL_LOGIN}" == "true" ]]; then
+    systemctl enable gdm.service
+    systemctl enable gnome-remote-desktop.service
+  else
+    systemctl disable gdm.service >/dev/null 2>&1 || true
+    systemctl disable gnome-remote-desktop.service >/dev/null 2>&1 || true
+  fi
+}
+
+configure_theme() {
+  log "Installing desktop theme assets"
+
+  dconf update || true
+  papirus-folders -t Papirus-Dark -C cat-macchiato-lavender || true
+
+  install -d -o "$NEMESIS_USER" -g "$NEMESIS_USER" "/home/$NEMESIS_USER/.themes"
+  asset_or_download \
+    "gnome/theme-gnomeshell-catppuccin.zip" \
+    "https://raw.githubusercontent.com/cinerieus/nemesisv2/refs/heads/main/config/theme-gnomeshell-catppuccin.zip" \
+    "/home/$NEMESIS_USER/.themes/theme-gnomeshell-catppuccin.zip"
+  chown "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER/.themes/theme-gnomeshell-catppuccin.zip"
+  as_user 7z x "/home/$NEMESIS_USER/.themes/theme-gnomeshell-catppuccin.zip" -o"/home/$NEMESIS_USER/.themes" || true
+  rm -f "/home/$NEMESIS_USER/.themes/theme-gnomeshell-catppuccin.zip"
+
+  local shell_theme="/home/$NEMESIS_USER/.themes/Catppuccin-Macchiato-Custom"
+  if [[ -d "$shell_theme" ]]; then
+    patch_shell_theme_accent "$shell_theme/gnome-shell/gnome-shell.css"
+    chown -R "$NEMESIS_USER:$NEMESIS_USER" "$shell_theme"
+  fi
+
+  mkdir -p /usr/local/share/backgrounds/nemesis
+  asset_or_download \
+    "wallpapers/background.png" \
+    "https://w.wallhaven.cc/full/rr/wallhaven-rr9kyw.png" \
+    /usr/local/share/backgrounds/nemesis/background.png
+
+  install -d "/home/$NEMESIS_USER/.config/wofi"
+  asset_or_download \
+    "wofi/style.css" \
+    "https://raw.githubusercontent.com/quantumfate/wofi/refs/heads/main/src/macchiato/style.css" \
+    "/home/$NEMESIS_USER/.config/wofi/style.css"
+  chown "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER/.config/wofi/style.css"
+
+  configure_gdm_theme
+
+  install -d "/home/$NEMESIS_USER/.config/systemd/user/default.target.wants"
+  ln -sfn /etc/systemd/user/nemesis-gnome-firstlogin.service \
+    "/home/$NEMESIS_USER/.config/systemd/user/default.target.wants/nemesis-gnome-firstlogin.service"
+  chown -R "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER/.config/systemd"
+}
+
+configure_gdm_theme() {
+  log "Configuring GDM theme assets"
+
+  local gst="/usr/share/gnome-shell/gnome-shell-theme.gresource"
+  local original="/usr/share/gnome-shell/gnome-shell-theme-original.gresource"
+  local workdir="/tmp/nemesis-gdm-shell-theme"
+  local xml="$repo_root/files/usr/local/share/nemesis-cloud/gnome/gnome-shell-theme.gresource.xml"
+  local background="/usr/local/share/backgrounds/nemesis/background.png"
+
+  if [[ ! -f "$gst" || ! -f "$xml" ]]; then
+    echo "Skipping GDM theme: required GNOME Shell resource files are missing"
+    return 0
+  fi
+
+  if [[ ! -f "$background" ]]; then
+    echo "Skipping GDM theme: background image is missing"
+    return 0
+  fi
+
+  if [[ ! -f "$original" ]]; then
+    cp "$gst" "$original"
+  else
+    cp "$original" "$gst"
+  fi
+
+  rm -rf "$workdir"
+  mkdir -p "$workdir/theme"
+
+  while IFS= read -r resource; do
+    local relative="${resource#/org/gnome/shell/}"
+    mkdir -p "$workdir/${relative%/*}"
+    gresource extract "$gst" "$resource" >"$workdir/$relative"
+  done < <(gresource list "$gst")
+
+  if ! magick "$background" -blur 0x15 "$workdir/theme/background.png"; then
+    echo "Skipping GDM theme: failed to generate blurred background"
+    rm -rf "$workdir"
+    return 0
+  fi
+  cp "$xml" "$workdir/theme/gnome-shell-theme.gresource.xml"
+
+  patch_shell_theme_accent "$workdir/theme/gnome-shell-light.css"
+  patch_shell_theme_accent "$workdir/theme/gnome-shell-dark.css"
+
+  sed -i '/lockDialogGroup/,+2d' "$workdir/theme/gnome-shell-light.css" || true
+  sed -i '/lockDialogGroup/,+2d' "$workdir/theme/gnome-shell-dark.css" || true
+
+  cat >>"$workdir/theme/gnome-shell-light.css" <<'EOF'
+
+#lockDialogGroup {
+  background: url("background.png");
+  background-size: auto;
+  background-repeat: no-repeat;
+}
+EOF
+
+  cat >>"$workdir/theme/gnome-shell-dark.css" <<'EOF'
+
+#lockDialogGroup {
+  background: url("background.png");
+  background-size: auto;
+  background-repeat: no-repeat;
+}
+EOF
+
+  glib-compile-resources \
+    --target "$gst" \
+    --sourcedir "$workdir/theme" \
+    "$workdir/theme/gnome-shell-theme.gresource.xml" || true
+
+  rm -rf "$workdir"
+}
+
+patch_shell_theme_accent() {
+  local css_file="$1"
+
+  if [[ ! -f "$css_file" ]]; then
+    return 0
+  fi
+
+  sed -i \
+    -e 's/#b7bdf8/#b4befe/g' \
+    -e 's/#c8cdfa/#c6d0ff/g' \
+    -e 's/#a2aafc/#9da9fa/g' \
+    "$css_file"
+}
+
+configure_vm_tools() {
+  log "Installing VM tools"
+  pacman_install open-vm-tools
+  systemctl enable vmtoolsd.service
+  systemctl enable vmware-vmblock-fuse.service || true
+}
+
+configure_rdp() {
+  if [[ -z "${RDP_PASSWORD}" ]]; then
+    echo "Skipping RDP: RDP_PASSWORD is empty"
+    return 0
+  fi
+
+  log "Configuring GNOME Remote Desktop"
+  install -d -o gnome-remote-desktop -g gnome-remote-desktop \
+    /var/lib/gnome-remote-desktop/.local/share/gnome-remote-desktop
+  sudo -Hu gnome-remote-desktop openssl req -new -newkey rsa:4096 -days 720 -nodes -x509 \
+    -subj /C=SE/ST=NONE/L=NONE/O=GNOME/CN=gnome.org \
+    -out /var/lib/gnome-remote-desktop/.local/share/gnome-remote-desktop/tls.crt \
+    -keyout /var/lib/gnome-remote-desktop/.local/share/gnome-remote-desktop/tls.key
+
+  grdctl --system rdp set-tls-key /var/lib/gnome-remote-desktop/.local/share/gnome-remote-desktop/tls.key
+  grdctl --system rdp set-tls-cert /var/lib/gnome-remote-desktop/.local/share/gnome-remote-desktop/tls.crt
+  grdctl --system rdp set-credentials "$RDP_USER" "$RDP_PASSWORD"
+  grdctl --system rdp enable
+}
+
+main() {
+  prepare_repo_assets
+  install_repo_files
+  configure_bootstrap_packages
+  configure_base
+  configure_repos
+  configure_core_packages
+  configure_networking
+  configure_mkinitcpio_for_luks
+  configure_grub_shim_secure_boot
+  configure_cli_customization
+  configure_desktop
+  configure_vm_tools
+}
+
+main "$@"

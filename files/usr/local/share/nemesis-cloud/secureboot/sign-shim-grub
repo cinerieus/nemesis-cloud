@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+key_dir="/etc/secureboot/mok"
+
+sign_file() {
+  local file="$1"
+  local signed
+
+  if [[ ! -f "$file" || ! -f "$key_dir/MOK.key" || ! -f "$key_dir/MOK.crt" ]]; then
+    return 0
+  fi
+
+  signed="$(mktemp)"
+  if sbsign --key "$key_dir/MOK.key" --cert "$key_dir/MOK.crt" --output "$signed" "$file"; then
+    install -m0644 "$signed" "$file"
+  fi
+  rm -f "$signed"
+}
+
+sign_file /boot/vmlinuz-linux
+
+if [[ -f /boot/EFI/BOOT/grubx64.efi ]]; then
+  sign_file /boot/EFI/BOOT/grubx64.efi
+elif [[ -f /efi/EFI/BOOT/grubx64.efi ]]; then
+  sign_file /efi/EFI/BOOT/grubx64.efi
+fi
