@@ -5,6 +5,9 @@ on:
   schedule:
     - cron: "0 3 * * 0"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -39,6 +42,25 @@ jobs:
             packer/output/nemesis-cloud/nemesis-cloud.qcow2 \
             packer/output/nemesis-cloud/nemesis-cloud.raw.zst \
             > packer/output/nemesis-cloud/SHA256SUMS
+
+      - name: Publish latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest Nemesis Cloud Image
+          body: |
+            Automated Nemesis Cloud image build.
+
+            Includes:
+            - nemesis-cloud.qcow2
+            - nemesis-cloud.raw.zst
+            - SHA256SUMS
+          files: |
+            packer/output/nemesis-cloud/nemesis-cloud.qcow2
+            packer/output/nemesis-cloud/nemesis-cloud.raw.zst
+            packer/output/nemesis-cloud/SHA256SUMS
+          make_latest: true
+          overwrite_files: true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
