@@ -124,7 +124,7 @@ build {
     ]
     inline = [
       "cd /tmp/nemesis-cloud",
-      "sudo ./init.sh --force-config --install-only",
+      "sudo ./scripts/install --force-config --install-only",
       "sudo /usr/local/share/nemesis-cloud/scripts/nemesis-firstboot",
     ]
     expect_disconnect = false

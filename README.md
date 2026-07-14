@@ -12,13 +12,34 @@ build image locally -> import qcow2/raw into a VM platform -> boot VM -> enroll 
 
 ## Start Here
 
-Install the build dependencies on the machine that will create the image:
+1. Install the build dependencies on the machine that will create the image:
 
 ```bash
 sudo pacman -Sy --needed packer qemu-base xorriso
 ```
 
-Build the image:
+2. Create a local build config:
+
+```bash
+cp nemesis-cloud.conf.example nemesis-cloud.conf
+```
+
+3. Edit `nemesis-cloud.conf`.
+
+The defaults are usable, so you can skip this edit if you just want the standard
+image:
+
+```bash
+NEMESIS_USER="user"
+NEMESIS_USER_PASSWORD="Ch4ngeM3!"
+NEMESIS_HOSTNAME=""
+ENABLE_GRAPHICAL_LOGIN="false"
+SSH_AUTHORIZED_KEY=""
+RDP_USER="rdp"
+RDP_PASSWORD="rdp"
+```
+
+4. Build the image:
 
 ```bash
 ./build-image.sh
@@ -74,6 +95,55 @@ SSH password login is intentionally disabled. Use SSH keys for SSH.
 
 Cloud-init or a provider UI can replace the console user password, root
 password, hostname, and SSH keys when the VM is created.
+
+## Configure Before Build
+
+The file you normally edit before building is:
+
+```text
+nemesis-cloud.conf
+```
+
+Create it from the example:
+
+```bash
+cp nemesis-cloud.conf.example nemesis-cloud.conf
+```
+
+`nemesis-cloud.conf` is ignored by git so local passwords and keys do not get
+committed accidentally.
+
+Common settings:
+
+| Setting | What it controls |
+|---------|------------------|
+| `NEMESIS_USER` | Local console/sudo user baked into the image |
+| `NEMESIS_USER_PASSWORD` | Initial password for that local user |
+| `NEMESIS_HOSTNAME` | Baked hostname; empty generates `DESKTOP-XXXXXXX` |
+| `ENABLE_GRAPHICAL_LOGIN` | Starts GDM/RDP automatically when `true` |
+| `SSH_AUTHORIZED_KEY` | SSH key baked into the local user account |
+| `RDP_USER` / `RDP_PASSWORD` | Initial GNOME Remote Desktop credentials |
+
+Example:
+
+```bash
+NEMESIS_USER="cinereus"
+NEMESIS_USER_PASSWORD="change-this"
+NEMESIS_HOSTNAME="DESKTOP-NEMESIS"
+ENABLE_GRAPHICAL_LOGIN="true"
+SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA..."
+RDP_USER="rdp"
+RDP_PASSWORD="rdp"
+```
+
+Then build:
+
+```bash
+./build-image.sh
+```
+
+Command-line options to `scripts/install` are mainly for customizing an already-running
+VM. For normal image builds, use `nemesis-cloud.conf`.
 
 ## Importing The Image
 
@@ -150,12 +220,6 @@ runcmd:
   - [bash, -lc, "systemctl enable --now gdm.service gnome-remote-desktop.service"]
 ```
 
-There is a small example cloud-init file at:
-
-```text
-examples/user-data.yaml
-```
-
 ## Encrypted Workspace
 
 Root disk encryption should be handled before first boot, during image creation
@@ -204,21 +268,21 @@ If you already have an Arch VM and want to apply this setup manually, clone this
 repo inside that VM and run:
 
 ```bash
-./init.sh
+./scripts/install
 ```
 
 Common options:
 
 ```bash
-./init.sh --user USER --hostname PC
-./init.sh --enable-desktop-login
-./init.sh --password 'new-password'
-./init.sh --luks-note
-./init.sh --ssh-key "ssh-ed25519 ..."
-./init.sh --force-config
+./scripts/install --user USER --hostname PC
+./scripts/install --enable-desktop-login
+./scripts/install --password 'new-password'
+./scripts/install --luks-note
+./scripts/install --ssh-key "ssh-ed25519 ..."
+./scripts/install --force-config
 ```
 
-`init.sh` installs the repo into:
+`scripts/install` installs the repo into:
 
 ```text
 /usr/local/share/nemesis-cloud
@@ -238,7 +302,9 @@ Provisioning logs are written to:
 
 ## Build Configuration
 
-`/etc/nemesis-cloud.conf` controls the provisioning script:
+During provisioning, `scripts/install` writes `/etc/nemesis-cloud.conf` inside the VM.
+It is generated from the repo-local `nemesis-cloud.conf` file when that file
+exists, otherwise defaults are used:
 
 ```bash
 NEMESIS_USER="user"
@@ -253,7 +319,7 @@ RDP_USER="rdp"
 RDP_PASSWORD="rdp"
 ```
 
-For the normal Packer image build, this file is written by `init.sh` during the
+For the normal Packer image build, this file is written by `scripts/install` during the
 build.
 
 ## Troubleshooting
@@ -290,18 +356,25 @@ ls -lh packer/output/nemesis-cloud/
 The raw image is the full virtual disk size. Compress it with `zstd` before
 uploading or archiving.
 
+### GitHub Actions storage
+
+The workflow is kept as a build template, but GitHub Releases reject individual
+assets larger than 2 GiB. This image is usually much larger than that, so use an
+external storage target such as S3, Backblaze B2, Cloudflare R2, MinIO, or a
+self-hosted artifact server if you want automated uploads.
+
 ## Repository Layout
 
 ```text
 .
 ├── .github/workflows/        # Optional GitHub Actions build workflow
 ├── assets/                   # Vendored visual assets
-├── examples/                 # Runtime cloud-init examples
 ├── files/                    # System/user config copied into the image
 ├── packer/                   # Packer QEMU template
 ├── scripts/                  # Provisioning and helper scripts
 ├── build-image.sh            # Packer wrapper and raw converter
-└── init.sh                   # Local/existing-VM installer
+├── scripts/install                   # Local/existing-VM installer
+└── nemesis-cloud.conf.example
 ```
 
 ## Validation
@@ -309,7 +382,6 @@ uploading or archiving.
 Useful checks while editing:
 
 ```bash
-bash -n build-image.sh init.sh scripts/nemesis-firstboot scripts/nemesis-gnome-firstlogin scripts/nemesis-workspace
+bash -n build-image.sh scripts/install scripts/nemesis-firstboot scripts/nemesis-gnome-firstlogin scripts/nemesis-workspace
 packer validate -var output_directory=/tmp/nemesis-cloud-validate-output packer/nemesis-cloud.pkr.hcl
-cloud-init schema -c examples/user-data.yaml
 ```

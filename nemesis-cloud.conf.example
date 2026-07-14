@@ -1,0 +1,37 @@
+# Local build/provisioning config.
+#
+# To configure a base image before building:
+#
+#   cp nemesis-cloud.conf.example nemesis-cloud.conf
+#   edit nemesis-cloud.conf
+#   ./build-image.sh
+#
+# The real nemesis-cloud.conf file is ignored by git.
+
+# Local console user baked into the image.
+NEMESIS_USER="user"
+NEMESIS_USER_PASSWORD="Ch4ngeM3!"
+
+# Empty generates a Windows-style DESKTOP-XXXXXXX hostname during provisioning.
+# Most cloud platforms can still replace the hostname with cloud-init metadata.
+NEMESIS_HOSTNAME=""
+
+# The desktop is installed either way. This only controls whether GDM/RDP start
+# automatically after boot.
+ENABLE_GRAPHICAL_LOGIN="false"
+
+# Writes a root note about root-LUKS setup. It does not encrypt the root disk.
+ENABLE_LUKS_NOTE="false"
+
+# Optional public key for the baked local user. Cloud-init/provider keys can
+# still be injected later at VM creation time.
+SSH_AUTHORIZED_KEY=""
+
+# Initial GNOME Remote Desktop credentials.
+RDP_USER="rdp"
+RDP_PASSWORD="rdp"
+
+# Optional repo source for runtime asset refreshes. Usually leave empty for the
+# Packer build because assets are copied into the image.
+NEMESIS_REPO_URL=""
+NEMESIS_REPO_REF="main"

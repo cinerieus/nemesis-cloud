@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd -- "$script_dir/.." && pwd)"
 install_dir="/usr/local/share/nemesis-cloud"
 config_file="/etc/nemesis-cloud.conf"
+local_config_file="$repo_dir/nemesis-cloud.conf"
 log_file="/var/log/nemesis-firstboot.log"
 
 if [[ "${EUID}" -ne 0 ]]; then
@@ -12,7 +14,7 @@ fi
 
 usage() {
   cat <<'EOF'
-Usage: ./init.sh [options]
+Usage: scripts/install [options]
 
 Options:
   --user NAME              Target user to configure. Default: user
@@ -43,6 +45,28 @@ rdp_user="rdp"
 rdp_password="rdp"
 force_config="false"
 install_only="false"
+
+apply_local_config() {
+  if [[ ! -f "$local_config_file" ]]; then
+    return 0
+  fi
+
+  # shellcheck source=/dev/null
+  source "$local_config_file"
+
+  if [[ ${NEMESIS_USER+x} ]]; then nemesis_user="$NEMESIS_USER"; fi
+  if [[ ${NEMESIS_HOSTNAME+x} ]]; then nemesis_hostname="$NEMESIS_HOSTNAME"; fi
+  if [[ ${NEMESIS_USER_PASSWORD+x} ]]; then nemesis_user_password="$NEMESIS_USER_PASSWORD"; fi
+  if [[ ${ENABLE_GRAPHICAL_LOGIN+x} ]]; then enable_graphical_login="$ENABLE_GRAPHICAL_LOGIN"; fi
+  if [[ ${ENABLE_LUKS_NOTE+x} ]]; then enable_luks_note="$ENABLE_LUKS_NOTE"; fi
+  if [[ ${NEMESIS_REPO_URL+x} ]]; then nemesis_repo_url="$NEMESIS_REPO_URL"; fi
+  if [[ ${NEMESIS_REPO_REF+x} ]]; then nemesis_repo_ref="$NEMESIS_REPO_REF"; fi
+  if [[ ${SSH_AUTHORIZED_KEY+x} ]]; then ssh_authorized_key="$SSH_AUTHORIZED_KEY"; fi
+  if [[ ${RDP_USER+x} ]]; then rdp_user="$RDP_USER"; fi
+  if [[ ${RDP_PASSWORD+x} ]]; then rdp_password="$RDP_PASSWORD"; fi
+}
+
+apply_local_config
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -143,6 +167,7 @@ install_project() {
   fi
 
   chown -R root:root "$install_dir"
+  chmod 0755 "$install_dir/scripts/install"
   chmod 0755 "$install_dir/scripts/nemesis-firstboot"
   chmod 0755 "$install_dir/scripts/nemesis-gnome-firstlogin"
   chmod 0755 "$install_dir/scripts/nemesis-workspace"
