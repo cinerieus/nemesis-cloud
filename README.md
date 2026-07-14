@@ -77,17 +77,6 @@ The repo contains the project scripts, configs, dotfiles, wallpaper, GNOME theme
 GRUB theme, and Wofi CSS. Package installs still use the Arch, BlackArch, AUR,
 and GitHub upstreams during the build.
 
-The GitHub Actions workflow publishes two variants when R2 secrets are set:
-
-```text
-minimal/latest/nemesis-cloud.qcow2
-minimal/latest/nemesis-cloud.raw
-desktop/latest/nemesis-cloud.qcow2
-desktop/latest/nemesis-cloud.raw
-```
-
-If `R2_PREFIX` is set, it is prepended to those paths.
-
 ## WSL Setup
 
 For a fresh Arch WSL install that only has `root`, use the WSL profile instead
