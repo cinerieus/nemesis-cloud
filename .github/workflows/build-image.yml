@@ -10,8 +10,17 @@ permissions:
 
 jobs:
   build:
+    name: Build ${{ matrix.variant.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - name: minimal
+            enable_graphical_login: "false"
+          - name: desktop
+            enable_graphical_login: "true"
 
     steps:
       - name: Checkout
@@ -44,6 +53,21 @@ jobs:
           sudo /tmp/aws/install
           aws --version
 
+      - name: Configure image variant
+        run: |
+          cat > nemesis-cloud.conf <<EOF
+          NEMESIS_USER="user"
+          NEMESIS_USER_PASSWORD="Ch4ngeM3!"
+          NEMESIS_HOSTNAME=""
+          ENABLE_GRAPHICAL_LOGIN="${{ matrix.variant.enable_graphical_login }}"
+          INSTALL_PROFILE="image"
+          SSH_AUTHORIZED_KEY=""
+          RDP_USER="rdp"
+          RDP_PASSWORD="rdp"
+          NEMESIS_REPO_URL=""
+          NEMESIS_REPO_REF="main"
+          EOF
+
       - name: Build image
         run: ./build-image.sh
 
@@ -67,10 +91,10 @@ jobs:
 
           out="packer/output/nemesis-cloud"
           endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          remote_prefix="latest"
+          remote_prefix="${{ matrix.variant.name }}/latest"
 
           if [[ -n "${R2_PREFIX:-}" ]]; then
-            remote_prefix="${R2_PREFIX%/}/latest"
+            remote_prefix="${R2_PREFIX%/}/${{ matrix.variant.name }}/latest"
           fi
 
           aws --endpoint-url "$endpoint" s3 cp "$out/nemesis-cloud.qcow2" "s3://${R2_BUCKET}/${remote_prefix}/nemesis-cloud.qcow2"

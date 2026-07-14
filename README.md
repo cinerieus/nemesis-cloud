@@ -64,10 +64,10 @@ Use `nemesis-cloud.qcow2` for local QEMU/libvirt/Cockpit. Use
 | Area | What is included |
 |------|------------------|
 | Base OS | Official Arch cloud image, updated during build |
-| Desktop | GNOME, Firefox, LibreOffice, Kitty, Wofi, Thunar |
+| Desktop | Optional GNOME, Firefox, LibreOffice, Kitty, Wofi, Thunar |
 | Security tooling | BlackArch repo, selected BlackArch/AUR tools |
 | CLI setup | fish, tmux, Neovim, Catppuccin-style config |
-| Remote access | SSH enabled, GNOME Remote Desktop configured |
+| Remote access | SSH enabled, optional GNOME Remote Desktop |
 | VM support | VM tools, cloud-init, NetworkManager, systemd-resolved |
 | Secure Boot | Microsoft-signed shim, GRUB, local MOK signing |
 | Storage | Optional file-backed LUKS workspace helper |
@@ -76,6 +76,17 @@ Use `nemesis-cloud.qcow2` for local QEMU/libvirt/Cockpit. Use
 The repo contains the project scripts, configs, dotfiles, wallpaper, GNOME theme,
 GRUB theme, and Wofi CSS. Package installs still use the Arch, BlackArch, AUR,
 and GitHub upstreams during the build.
+
+The GitHub Actions workflow publishes two variants when R2 secrets are set:
+
+```text
+minimal/latest/nemesis-cloud.qcow2
+minimal/latest/nemesis-cloud.raw
+desktop/latest/nemesis-cloud.qcow2
+desktop/latest/nemesis-cloud.raw
+```
+
+If `R2_PREFIX` is set, it is prepended to those paths.
 
 ## WSL Setup
 
@@ -164,7 +175,7 @@ Common settings:
 | `NEMESIS_USER_PASSWORD` | Initial password for that local user |
 | `NEMESIS_HOSTNAME` | Baked hostname; empty generates `DESKTOP-XXXXXXX` |
 | `INSTALL_PROFILE` | `image` for VM/cloud builds, `wsl` for WSL |
-| `ENABLE_GRAPHICAL_LOGIN` | Starts GDM/RDP automatically when `true` |
+| `ENABLE_GRAPHICAL_LOGIN` | Builds the desktop/RDP variant when `true`; minimal when `false` |
 | `SSH_AUTHORIZED_KEY` | SSH key baked into the local user account |
 | `RDP_USER` / `RDP_PASSWORD` | Initial GNOME Remote Desktop credentials |
 
@@ -246,40 +257,41 @@ EFI/BOOT/mmx64.efi
 
 A pacman hook re-signs GRUB and the kernel after updates.
 
-## Enabling The Desktop Login
+## Desktop Variant
 
-The desktop is installed and themed, but graphical login is disabled by default
-for base-image reuse.
-
-Enable it inside the VM:
+Set this before building if you want GNOME, theming, GNOME Remote Desktop, and
+graphical login:
 
 ```bash
-sudo systemctl enable --now gdm.service gnome-remote-desktop.service
+ENABLE_GRAPHICAL_LOGIN="true"
 ```
 
-Or enable it with cloud-init when creating the VM:
+The default is the minimal variant:
 
-```yaml
-#cloud-config
-runcmd:
-  - [bash, -lc, "systemctl enable --now gdm.service gnome-remote-desktop.service"]
+```bash
+ENABLE_GRAPHICAL_LOGIN="false"
 ```
 
 ## Encrypted Workspace
 
-Root disk encryption should be handled before first boot, during image creation
-or provider provisioning. This repo does not repartition and encrypt an already
-running root filesystem.
-
-For a simpler encrypted working area inside the VM:
+This image includes `nemesis-workspace`, a helper for creating a file-backed
+LUKS workspace at `/opt/workspace`.
 
 ```bash
 sudo nemesis-workspace init --size 50G
 sudo nemesis-workspace open
+sudo nemesis-workspace resize --size 100G
 sudo nemesis-workspace close
+sudo nemesis-workspace status
 ```
 
-This creates file-backed LUKS storage for `/opt/workspace`.
+The `init` command asks for a passphrase. Keep that passphrase safe; it is not
+stored by the image. The resize command grows the sparse LUKS container; it does
+not support shrinking. A copy of these commands is written to:
+
+```text
+/root/NEMESIS-WORKSPACE-NOTE.txt
+```
 
 ## Building With Different Resources
 
@@ -322,7 +334,6 @@ Common options:
 ./scripts/install --user USER --hostname PC
 ./scripts/install --enable-desktop-login
 ./scripts/install --password 'new-password'
-./scripts/install --luks-note
 ./scripts/install --ssh-key "ssh-ed25519 ..."
 ./scripts/install --force-config
 ```
@@ -357,7 +368,6 @@ NEMESIS_HOSTNAME=""        # Empty generates DESKTOP-XXXXXXX.
 NEMESIS_USER_PASSWORD="Ch4ngeM3!"
 ENABLE_GRAPHICAL_LOGIN="false"
 INSTALL_PROFILE="image"
-ENABLE_LUKS_NOTE="false"
 NEMESIS_REPO_URL=""
 NEMESIS_REPO_REF="main"
 SSH_AUTHORIZED_KEY=""

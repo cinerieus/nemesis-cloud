@@ -365,31 +365,32 @@ configure_core_packages() {
   pacman_install "${packages[@]}"
 }
 
-configure_mkinitcpio_for_luks() {
-  if is_wsl_profile; then
-    return 0
-  fi
+write_workspace_note() {
+  log "Recording encrypted workspace guidance"
+  cat >/root/NEMESIS-WORKSPACE-NOTE.txt <<'EOF'
+Nemesis encrypted workspace
 
-  if [[ "${ENABLE_LUKS_NOTE}" != "true" ]]; then
-    return 0
-  fi
+This image includes a helper for creating a file-backed LUKS workspace at
+/opt/workspace. This encrypts workspace data without changing the boot disk
+layout.
 
-  if ! is_first_boot; then
-    echo "Skipping LUKS first-boot note: cloud-init first boot has already completed"
-    return 0
-  fi
+Create an encrypted workspace:
+  sudo nemesis-workspace init --size 50G
 
-  log "Recording LUKS guidance"
-  cat >/root/NEMESIS-LUKS-NOTE.txt <<'EOF'
-Root LUKS encryption should be created before first boot, during image
-build or OS installation. This cloud-config does not repartition or
-encrypt the mounted root filesystem.
+Open it after boot:
+  sudo nemesis-workspace open
 
-For Arch with systemd initramfs, prefer sd-encrypt and GRUB:
-  HOOKS=(base systemd autodetect keyboard sd-vconsole modconf block sd-encrypt lvm2 filesystems fsck)
+Grow it later:
+  sudo nemesis-workspace resize --size 100G
 
-Then add the correct cryptdevice/rd.luks and root entries to /etc/default/grub
-and regenerate /boot/grub/grub.cfg.
+Close and lock it:
+  sudo nemesis-workspace close
+
+Check status:
+  sudo nemesis-workspace status
+
+The init command asks for a passphrase. Keep that passphrase safe; it is not
+stored by the image.
 EOF
 }
 
@@ -628,7 +629,7 @@ EOF
 }
 
 configure_desktop() {
-  if is_wsl_profile; then
+  if is_wsl_profile || [[ "${ENABLE_GRAPHICAL_LOGIN}" != "true" ]]; then
     return 0
   fi
 
@@ -648,13 +649,8 @@ configure_desktop() {
   configure_theme
   configure_rdp
 
-  if [[ "${ENABLE_GRAPHICAL_LOGIN}" == "true" ]]; then
-    systemctl enable gdm.service
-    systemctl enable gnome-remote-desktop.service
-  else
-    systemctl disable gdm.service >/dev/null 2>&1 || true
-    systemctl disable gnome-remote-desktop.service >/dev/null 2>&1 || true
-  fi
+  systemctl enable gdm.service
+  systemctl enable gnome-remote-desktop.service
 }
 
 configure_theme() {
@@ -858,7 +854,7 @@ main() {
   configure_core_packages
   configure_aur_helper
   configure_networking
-  configure_mkinitcpio_for_luks
+  write_workspace_note
   configure_grub_shim_secure_boot
   configure_cli_customization
   configure_wsl

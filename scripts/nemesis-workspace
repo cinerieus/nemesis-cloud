@@ -15,10 +15,12 @@ Commands:
   init [--size SIZE]   Create encrypted /opt/workspace container.
   open                 Unlock and mount encrypted workspace.
   close                Unmount and lock encrypted workspace.
+  resize --size SIZE   Grow encrypted workspace container.
   status               Show workspace status.
 
 Examples:
   sudo nemesis-workspace init --size 50G
+  sudo nemesis-workspace resize --size 100G
   sudo nemesis-workspace open
   sudo nemesis-workspace close
 EOF
@@ -72,6 +74,8 @@ close_workspace() {
 status_workspace() {
   if [[ -f "$container" ]]; then
     echo "container: $container"
+    echo "container logical size: $(ls -lh "$container" | awk '{print $5}')"
+    echo "container disk used: $(du -h "$container" | awk '{print $1}')"
   else
     echo "container: missing"
   fi
@@ -140,6 +144,64 @@ init_workspace() {
   echo "Use 'sudo nemesis-workspace open' after reboot, and 'sudo nemesis-workspace close' to lock it."
 }
 
+resize_workspace() {
+  local size=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --size)
+        size="$2"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        echo "Unknown option: $1" >&2
+        usage >&2
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ -z "$size" ]]; then
+    echo "resize requires --size SIZE, for example: sudo nemesis-workspace resize --size 100G" >&2
+    exit 2
+  fi
+
+  if [[ ! -f "$container" ]]; then
+    echo "$container does not exist. Run: sudo nemesis-workspace init --size $size" >&2
+    exit 1
+  fi
+
+  local current_size target_size size_probe
+  current_size="$(stat -c '%s' "$container")"
+
+  size_probe="$(mktemp)"
+  truncate -s "$size" "$size_probe"
+  target_size="$(stat -c '%s' "$size_probe")"
+  rm -f "$size_probe"
+
+  if (( target_size < current_size )); then
+    echo "Refusing to shrink $container. Resize only supports growing." >&2
+    exit 1
+  fi
+
+  if (( target_size == current_size )); then
+    echo "$container is already $size."
+    exit 0
+  fi
+
+  truncate -s "$size" "$container"
+  open_workspace
+  cryptsetup resize "$mapper_name"
+  resize2fs "$(mapper_path)"
+  workspace_permissions
+
+  echo "Encrypted workspace resized to $size."
+}
+
 need_root "$@"
 
 command="${1:-}"
@@ -154,6 +216,9 @@ case "$command" in
     ;;
   close)
     close_workspace
+    ;;
+  resize)
+    resize_workspace "$@"
     ;;
   status)
     status_workspace

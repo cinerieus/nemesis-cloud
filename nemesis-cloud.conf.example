@@ -17,16 +17,12 @@ NEMESIS_USER_PASSWORD="Ch4ngeM3!"
 # Most cloud platforms can still replace the hostname with cloud-init metadata.
 NEMESIS_HOSTNAME=""
 
-# The desktop is installed either way. This only controls whether GDM/RDP start
-# automatically after boot.
+# Installs GNOME desktop, theming, and GNOME Remote Desktop support when true.
 ENABLE_GRAPHICAL_LOGIN="false"
 
 # image = VM/cloud image profile.
 # wsl   = WSL profile. Skips desktop/RDP/cloud-init/bootloader/VM services.
 INSTALL_PROFILE="image"
-
-# Writes a root note about root-LUKS setup. It does not encrypt the root disk.
-ENABLE_LUKS_NOTE="false"
 
 # Optional public key for the baked local user. Cloud-init/provider keys can
 # still be injected later at VM creation time.
