@@ -3,6 +3,7 @@ set -euo pipefail
 
 source /etc/nemesis-cloud.conf
 export TERM="${TERM:-xterm-256color}"
+INSTALL_PROFILE="${INSTALL_PROFILE:-image}"
 
 repo_root="/usr/local/share/nemesis-cloud"
 asset_root="$repo_root/assets"
@@ -54,6 +55,10 @@ install_noto_nerd_font() {
 
 is_first_boot() {
   [[ ! -e /var/lib/cloud/instance/boot-finished ]]
+}
+
+is_wsl_profile() {
+  [[ "$INSTALL_PROFILE" == "wsl" ]]
 }
 
 resolve_hostname() {
@@ -112,16 +117,16 @@ prepare_repo_assets() {
   fi
 }
 
-asset_or_download() {
+install_asset() {
   local relative="$1"
-  local url="$2"
-  local destination="$3"
+  local destination="$2"
 
-  if [[ -f "$asset_root/$relative" ]]; then
-    install -m0644 "$asset_root/$relative" "$destination"
-  else
-    curl_fetch "$url" -o "$destination"
+  if [[ ! -f "$asset_root/$relative" ]]; then
+    echo "Missing required asset: $asset_root/$relative" >&2
+    return 1
   fi
+
+  install -m0644 "$asset_root/$relative" "$destination"
 }
 
 install_repo_files() {
@@ -146,6 +151,9 @@ install_repo_files() {
   chmod 0644 /etc/systemd/resolved.conf.d/10-nemesis.conf
   chmod 0644 /etc/NetworkManager/conf.d/10-dns-systemd-resolved.conf
   chmod 0644 /etc/NetworkManager/conf.d/20-connectivity.conf
+  if is_wsl_profile; then
+    rm -f /etc/ssh/sshd_config.d/10-nemesis.conf
+  fi
   if command -v dconf >/dev/null 2>&1; then
     dconf update || true
   fi
@@ -207,6 +215,11 @@ install_aur_package() {
   with_aur_pacman_sudo as_user yay --noconfirm --needed -S "$package"
 }
 
+configure_aur_helper() {
+  log "Configuring AUR helper"
+  install_yay
+}
+
 configure_base() {
   log "Configuring base system"
 
@@ -241,7 +254,7 @@ EOF
   chmod 2775 /opt/workspace
   setfacl -Rdm g:users:rwx /opt/workspace
 
-  if [[ -n "${SSH_AUTHORIZED_KEY}" ]]; then
+  if [[ -n "${SSH_AUTHORIZED_KEY}" && ! is_wsl_profile ]]; then
     install -d -m 0750 -o "$NEMESIS_USER" -g "$NEMESIS_USER" "/home/$NEMESIS_USER/.ssh"
     printf '%s\n' "$SSH_AUTHORIZED_KEY" >"/home/$NEMESIS_USER/.ssh/authorized_keys"
     chown "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER/.ssh/authorized_keys"
@@ -251,6 +264,10 @@ EOF
 
 configure_networking() {
   log "Configuring systemd networking services"
+
+  if is_wsl_profile; then
+    return 0
+  fi
 
   systemctl enable --now systemd-timesyncd.service
   systemctl enable --now systemd-resolved.service
@@ -285,20 +302,19 @@ EOF
 configure_bootstrap_packages() {
   log "Installing bootstrap packages"
 
-  pacman --noconfirm --needed -Sy sudo git curl base-devel
+  pacman --noconfirm --needed -Sy sudo git curl base-devel acl
 }
 
 configure_core_packages() {
   log "Installing core packages"
 
-  pacman_install \
+  local packages=(
     sudo \
     base-devel \
     git \
     curl \
     wget \
     openssh \
-    cloud-init \
     neovim \
     tmux \
     p7zip \
@@ -308,12 +324,7 @@ configure_core_packages() {
     ldns \
     lvm2 \
     cryptsetup \
-    efibootmgr \
-    grub \
-    mokutil \
     openssl \
-    sbsigntools \
-    networkmanager \
     systemd-resolvconf \
     acl \
     socat \
@@ -338,9 +349,27 @@ configure_core_packages() {
     subfinder \
     katana-pd \
     strace
+  )
+
+  if ! is_wsl_profile; then
+    packages+=(
+      cloud-init
+      efibootmgr
+      grub
+      mokutil
+      sbsigntools
+      networkmanager
+    )
+  fi
+
+  pacman_install "${packages[@]}"
 }
 
 configure_mkinitcpio_for_luks() {
+  if is_wsl_profile; then
+    return 0
+  fi
+
   if [[ "${ENABLE_LUKS_NOTE}" != "true" ]]; then
     return 0
   fi
@@ -365,6 +394,10 @@ EOF
 }
 
 configure_grub_shim_secure_boot() {
+  if is_wsl_profile; then
+    return 0
+  fi
+
   log "Configuring shim-signed GRUB Secure Boot path"
 
   local esp
@@ -512,9 +545,8 @@ sign_secure_boot_file() {
 configure_grub_theme() {
   mkdir -p /boot/grub/themes
 
-  asset_or_download \
+  install_asset \
     "grub/theme-grub-catppuccin.zip" \
-    "https://raw.githubusercontent.com/cinerieus/nemesisv2/refs/heads/main/config/theme-grub-catppuccin.zip" \
     /boot/grub/themes/theme-grub-catppuccin.zip
 
   7z x /boot/grub/themes/theme-grub-catppuccin.zip -o/boot/grub/themes || true
@@ -596,6 +628,10 @@ EOF
 }
 
 configure_desktop() {
+  if is_wsl_profile; then
+    return 0
+  fi
+
   log "Installing GNOME desktop"
   pacman_install gnome vulkan-intel firefox libreoffice kitty thunar wofi pipewire-libcamera glib2-devel dbus imagemagick
 
@@ -628,9 +664,8 @@ configure_theme() {
   papirus-folders -t Papirus-Dark -C cat-macchiato-lavender || true
 
   install -d -o "$NEMESIS_USER" -g "$NEMESIS_USER" "/home/$NEMESIS_USER/.themes"
-  asset_or_download \
+  install_asset \
     "gnome/theme-gnomeshell-catppuccin.zip" \
-    "https://raw.githubusercontent.com/cinerieus/nemesisv2/refs/heads/main/config/theme-gnomeshell-catppuccin.zip" \
     "/home/$NEMESIS_USER/.themes/theme-gnomeshell-catppuccin.zip"
   chown "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER/.themes/theme-gnomeshell-catppuccin.zip"
   as_user 7z x "/home/$NEMESIS_USER/.themes/theme-gnomeshell-catppuccin.zip" -o"/home/$NEMESIS_USER/.themes" || true
@@ -643,15 +678,13 @@ configure_theme() {
   fi
 
   mkdir -p /usr/local/share/backgrounds/nemesis
-  asset_or_download \
+  install_asset \
     "wallpapers/background.png" \
-    "https://w.wallhaven.cc/full/rr/wallhaven-rr9kyw.png" \
     /usr/local/share/backgrounds/nemesis/background.png
 
   install -d "/home/$NEMESIS_USER/.config/wofi"
-  asset_or_download \
+  install_asset \
     "wofi/style.css" \
-    "https://raw.githubusercontent.com/quantumfate/wofi/refs/heads/main/src/macchiato/style.css" \
     "/home/$NEMESIS_USER/.config/wofi/style.css"
   chown "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER/.config/wofi/style.css"
 
@@ -751,6 +784,10 @@ patch_shell_theme_accent() {
 }
 
 configure_vm_tools() {
+  if is_wsl_profile; then
+    return 0
+  fi
+
   log "Installing VM tools"
   pacman_install open-vm-tools
   systemctl enable vmtoolsd.service
@@ -758,6 +795,10 @@ configure_vm_tools() {
 }
 
 configure_rdp() {
+  if is_wsl_profile; then
+    return 0
+  fi
+
   if [[ -z "${RDP_PASSWORD}" ]]; then
     echo "Skipping RDP: RDP_PASSWORD is empty"
     return 0
@@ -777,6 +818,37 @@ configure_rdp() {
   grdctl --system rdp enable
 }
 
+configure_wsl() {
+  if ! is_wsl_profile; then
+    return 0
+  fi
+
+  log "Configuring WSL integration"
+
+  cat >/etc/wsl.conf <<EOF
+[boot]
+systemd=true
+
+[network]
+generateResolvConf=false
+
+[user]
+default=${NEMESIS_USER}
+EOF
+
+  rm -f /etc/resolv.conf
+  ln -sfn ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+
+  if [[ -d /run/systemd/system ]]; then
+    systemctl enable --now systemd-resolved.service || true
+  else
+    systemctl enable systemd-resolved.service || true
+    echo "WSL systemd is not active yet. Run 'wsl --shutdown' from Windows, then reopen this distro."
+  fi
+
+  passwd -l root >/dev/null 2>&1 || true
+}
+
 main() {
   prepare_repo_assets
   install_repo_files
@@ -784,10 +856,12 @@ main() {
   configure_base
   configure_repos
   configure_core_packages
+  configure_aur_helper
   configure_networking
   configure_mkinitcpio_for_luks
   configure_grub_shim_secure_boot
   configure_cli_customization
+  configure_wsl
   configure_desktop
   configure_vm_tools
 }

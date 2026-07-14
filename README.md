@@ -77,6 +77,49 @@ The repo contains the project scripts, configs, dotfiles, wallpaper, GNOME theme
 GRUB theme, and Wofi CSS. Package installs still use the Arch, BlackArch, AUR,
 and GitHub upstreams during the build.
 
+## WSL Setup
+
+For a fresh Arch WSL install that only has `root`, use the WSL profile instead
+of building a VM image.
+
+Inside WSL:
+
+```bash
+pacman -Sy --needed git
+git clone https://github.com/YOURUSER/nemesis-cloud.git
+cd nemesis-cloud
+cp nemesis-cloud.conf.example nemesis-cloud.conf
+vim nemesis-cloud.conf
+./scripts/install --wsl
+```
+
+At minimum, set:
+
+```bash
+NEMESIS_USER="youruser"
+NEMESIS_USER_PASSWORD="change-this"
+INSTALL_PROFILE="wsl"
+```
+
+The WSL profile:
+
+- creates and configures `NEMESIS_USER`
+- sets that user as the default WSL user in `/etc/wsl.conf`
+- enables WSL systemd
+- configures systemd-resolved and `/etc/resolv.conf`
+- sets up `/opt/workspace` permissions and default ACLs
+- locks the root password after the user/sudo path exists
+- installs BlackArch, `yay`, CLI/security tooling, and shell/editor/tmux config
+- skips GNOME, RDP, cloud-init, bootloader/Secure Boot, VM tools, NetworkManager, and SSH server enablement
+
+After it finishes, restart WSL from Windows:
+
+```powershell
+wsl --shutdown
+```
+
+Then reopen the distro. It should start as `NEMESIS_USER`.
+
 ## Default Credentials
 
 Local console user:
@@ -120,6 +163,7 @@ Common settings:
 | `NEMESIS_USER` | Local console/sudo user baked into the image |
 | `NEMESIS_USER_PASSWORD` | Initial password for that local user |
 | `NEMESIS_HOSTNAME` | Baked hostname; empty generates `DESKTOP-XXXXXXX` |
+| `INSTALL_PROFILE` | `image` for VM/cloud builds, `wsl` for WSL |
 | `ENABLE_GRAPHICAL_LOGIN` | Starts GDM/RDP automatically when `true` |
 | `SSH_AUTHORIZED_KEY` | SSH key baked into the local user account |
 | `RDP_USER` / `RDP_PASSWORD` | Initial GNOME Remote Desktop credentials |
@@ -131,6 +175,7 @@ NEMESIS_USER="cinereus"
 NEMESIS_USER_PASSWORD="change-this"
 NEMESIS_HOSTNAME="DESKTOP-NEMESIS"
 ENABLE_GRAPHICAL_LOGIN="true"
+INSTALL_PROFILE="image"
 SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA..."
 RDP_USER="rdp"
 RDP_PASSWORD="rdp"
@@ -311,6 +356,7 @@ NEMESIS_USER="user"
 NEMESIS_HOSTNAME=""        # Empty generates DESKTOP-XXXXXXX.
 NEMESIS_USER_PASSWORD="Ch4ngeM3!"
 ENABLE_GRAPHICAL_LOGIN="false"
+INSTALL_PROFILE="image"
 ENABLE_LUKS_NOTE="false"
 NEMESIS_REPO_URL=""
 NEMESIS_REPO_REF="main"
@@ -356,13 +402,6 @@ ls -lh packer/output/nemesis-cloud/
 The raw image is the full virtual disk size. Compress it with `zstd` before
 uploading or archiving.
 
-### GitHub Actions storage
-
-The workflow is kept as a build template, but GitHub Releases reject individual
-assets larger than 2 GiB. This image is usually much larger than that, so use an
-external storage target such as S3, Backblaze B2, Cloudflare R2, MinIO, or a
-self-hosted artifact server if you want automated uploads.
-
 ## Repository Layout
 
 ```text
@@ -373,7 +412,7 @@ self-hosted artifact server if you want automated uploads.
 ├── packer/                   # Packer QEMU template
 ├── scripts/                  # Provisioning and helper scripts
 ├── build-image.sh            # Packer wrapper and raw converter
-├── scripts/install                   # Local/existing-VM installer
+├── scripts/install           # Local/existing-VM installer
 └── nemesis-cloud.conf.example
 ```
 

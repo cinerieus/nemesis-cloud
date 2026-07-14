@@ -24,6 +24,7 @@ Options:
   --repo-ref REF           Repo branch/ref. Default: main
   --enable-desktop-login   Enable GDM and GNOME Remote Desktop services.
   --luks-note             Write first-boot LUKS guidance note.
+  --wsl                   Configure a WSL instance instead of a VM/cloud image.
   --ssh-key KEY            Authorized SSH public key for target user.
   --rdp-user NAME          Initial GNOME RDP user. Default: rdp
   --rdp-password PASSWORD  Initial GNOME RDP password. Default: rdp
@@ -38,6 +39,7 @@ nemesis_hostname=""
 nemesis_user_password="Ch4ngeM3!"
 enable_graphical_login="false"
 enable_luks_note="false"
+install_profile="image"
 nemesis_repo_url=""
 nemesis_repo_ref="main"
 ssh_authorized_key=""
@@ -59,6 +61,7 @@ apply_local_config() {
   if [[ ${NEMESIS_USER_PASSWORD+x} ]]; then nemesis_user_password="$NEMESIS_USER_PASSWORD"; fi
   if [[ ${ENABLE_GRAPHICAL_LOGIN+x} ]]; then enable_graphical_login="$ENABLE_GRAPHICAL_LOGIN"; fi
   if [[ ${ENABLE_LUKS_NOTE+x} ]]; then enable_luks_note="$ENABLE_LUKS_NOTE"; fi
+  if [[ ${INSTALL_PROFILE+x} ]]; then install_profile="$INSTALL_PROFILE"; fi
   if [[ ${NEMESIS_REPO_URL+x} ]]; then nemesis_repo_url="$NEMESIS_REPO_URL"; fi
   if [[ ${NEMESIS_REPO_REF+x} ]]; then nemesis_repo_ref="$NEMESIS_REPO_REF"; fi
   if [[ ${SSH_AUTHORIZED_KEY+x} ]]; then ssh_authorized_key="$SSH_AUTHORIZED_KEY"; fi
@@ -96,6 +99,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --luks-note)
       enable_luks_note="true"
+      shift
+      ;;
+    --wsl)
+      install_profile="wsl"
+      enable_graphical_login="false"
+      rdp_user=""
+      rdp_password=""
+      ssh_authorized_key=""
       shift
       ;;
     --ssh-key)
@@ -147,6 +158,7 @@ NEMESIS_HOSTNAME=$(quote_shell "$nemesis_hostname")
 NEMESIS_USER_PASSWORD=$(quote_shell "$nemesis_user_password")
 ENABLE_GRAPHICAL_LOGIN=$(quote_shell "$enable_graphical_login")
 ENABLE_LUKS_NOTE=$(quote_shell "$enable_luks_note")
+INSTALL_PROFILE=$(quote_shell "$install_profile")
 NEMESIS_REPO_URL=$(quote_shell "$nemesis_repo_url")
 NEMESIS_REPO_REF=$(quote_shell "$nemesis_repo_ref")
 SSH_AUTHORIZED_KEY=$(quote_shell "$ssh_authorized_key")

@@ -9,6 +9,7 @@
 # The real nemesis-cloud.conf file is ignored by git.
 
 # Local console user baked into the image.
+# For WSL this is the user that will be created and set as default.
 NEMESIS_USER="user"
 NEMESIS_USER_PASSWORD="Ch4ngeM3!"
 
@@ -19,6 +20,10 @@ NEMESIS_HOSTNAME=""
 # The desktop is installed either way. This only controls whether GDM/RDP start
 # automatically after boot.
 ENABLE_GRAPHICAL_LOGIN="false"
+
+# image = VM/cloud image profile.
+# wsl   = WSL profile. Skips desktop/RDP/cloud-init/bootloader/VM services.
+INSTALL_PROFILE="image"
 
 # Writes a root note about root-LUKS setup. It does not encrypt the root disk.
 ENABLE_LUKS_NOTE="false"
