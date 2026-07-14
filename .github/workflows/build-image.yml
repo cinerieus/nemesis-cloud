@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 qemu-utils xorriso zstd curl unzip awscli
+          sudo apt-get install -y qemu-system-x86 qemu-utils xorriso curl unzip awscli
 
       - name: Install Packer
         uses: hashicorp/setup-packer@v3
@@ -35,13 +35,11 @@ jobs:
       - name: Build image
         run: ./build-image.sh
 
-      - name: Compress images
+      - name: Generate checksums
         run: |
-          zstd -T0 -10 -f packer/output/nemesis-cloud/nemesis-cloud.qcow2
-          zstd -T0 -10 -f packer/output/nemesis-cloud/nemesis-cloud.raw
           sha256sum \
-            packer/output/nemesis-cloud/nemesis-cloud.qcow2.zst \
-            packer/output/nemesis-cloud/nemesis-cloud.raw.zst \
+            packer/output/nemesis-cloud/nemesis-cloud.qcow2 \
+            packer/output/nemesis-cloud/nemesis-cloud.raw \
             > packer/output/nemesis-cloud/SHA256SUMS
 
       - name: Upload images to Cloudflare R2
@@ -56,9 +54,13 @@ jobs:
           set -euo pipefail
 
           out="packer/output/nemesis-cloud"
-          prefix="${R2_PREFIX:-nemesis-cloud}"
           endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          remote_prefix="latest"
 
-          aws --endpoint-url "$endpoint" s3 cp "$out/nemesis-cloud.qcow2.zst" "s3://${R2_BUCKET}/${prefix}/latest/nemesis-cloud.qcow2.zst"
-          aws --endpoint-url "$endpoint" s3 cp "$out/nemesis-cloud.raw.zst" "s3://${R2_BUCKET}/${prefix}/latest/nemesis-cloud.raw.zst"
-          aws --endpoint-url "$endpoint" s3 cp "$out/SHA256SUMS" "s3://${R2_BUCKET}/${prefix}/latest/SHA256SUMS"
+          if [[ -n "${R2_PREFIX:-}" ]]; then
+            remote_prefix="${R2_PREFIX%/}/latest"
+          fi
+
+          aws --endpoint-url "$endpoint" s3 cp "$out/nemesis-cloud.qcow2" "s3://${R2_BUCKET}/${remote_prefix}/nemesis-cloud.qcow2"
+          aws --endpoint-url "$endpoint" s3 cp "$out/nemesis-cloud.raw" "s3://${R2_BUCKET}/${remote_prefix}/nemesis-cloud.raw"
+          aws --endpoint-url "$endpoint" s3 cp "$out/SHA256SUMS" "s3://${R2_BUCKET}/${remote_prefix}/SHA256SUMS"
