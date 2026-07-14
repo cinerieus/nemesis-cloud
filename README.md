@@ -1,59 +1,18 @@
-<div align="left">
+# Nemesis Cloud
 
-<h3>Arch VM Base Image Builder</h3>
-<p><i>Build a reusable Nemesis desktop/cloud image with Packer, GNOME, BlackArch tooling, cloud-init, and shim Secure Boot support.</i></p>
+Nemesis Cloud builds a reusable Arch Linux VM image with GNOME, BlackArch tools,
+CLI configuration, cloud-init support, VM tools, and a shim/GRUB Secure Boot
+boot path.
 
-[![Packer](https://img.shields.io/badge/packer-qemu-1a1a2e?style=flat-square)](https://developer.hashicorp.com/packer)
-[![Platform](https://img.shields.io/badge/platform-arch%20%7C%20qemu%2Fkvm-1793d1?style=flat-square)]()
-[![Cloud Init](https://img.shields.io/badge/cloud--init-ready-8b5cf6?style=flat-square)](https://cloud-init.io/)
-
-<p>
-  <a href="#overview">Overview</a> •
-  <a href="#features">Features</a> •
-  <a href="#build">Build</a> •
-  <a href="#runtime-customization">Runtime Customization</a> •
-  <a href="#existing-vms">Existing VMs</a> •
-  <a href="#layout">Layout</a>
-</p>
-
-</div>
-
----
-
-## Overview
-
-Nemesis Cloud builds a reusable Arch-based VM image from the official Arch cloud
-qcow2. The build installs the desktop, tooling, themes, CLI configuration, VM
-integration, cloud-init, and a shim/GRUB Secure Boot path.
-
-The primary artifacts are:
+The normal workflow is:
 
 ```text
-packer/output/nemesis-cloud/nemesis-cloud.qcow2
-packer/output/nemesis-cloud/nemesis-cloud.raw
+build image locally -> import qcow2/raw into a VM platform -> boot VM -> enroll MOK if Secure Boot is enabled -> log in
 ```
 
-Use the qcow2 locally with QEMU/libvirt/Cockpit. Use the raw image for providers
-that only accept raw disk uploads.
+## Start Here
 
-## Features
-
-| Feature | Description |
-|---------|-------------|
-| **Arch Cloud Base** | Starts from the official Arch cloud image |
-| **Packer Build** | Produces repeatable qcow2 output and converts it to raw |
-| **Cloud-Init Ready** | Cleans machine identity and cloud-init state for reuse |
-| **GNOME Desktop** | Installs and themes GNOME, but leaves graphical login disabled by default |
-| **Remote Desktop** | Configures GNOME RDP credentials as `rdp / rdp` |
-| **CLI Setup** | Applies fish, tmux, Neovim, Kitty, Wofi, font, and shell config |
-| **BlackArch/AUR** | Enables BlackArch and installs selected AUR packages |
-| **Secure Boot Path** | Uses Microsoft-signed shim, GRUB, and local MOK signing |
-| **Encrypted Workspace** | Includes `nemesis-workspace` for file-backed LUKS storage under `/opt/workspace` |
-| **VM Integration** | Installs VM tools and keeps the image ready for KVM/Cockpit/cloud providers |
-
-## Build
-
-Install host dependencies:
+Install the build dependencies on the machine that will create the image:
 
 ```bash
 sudo pacman -Sy --needed packer qemu-base xorriso
@@ -65,69 +24,125 @@ Build the image:
 ./build-image.sh
 ```
 
-Override Packer variables when needed:
+The build takes a while. It downloads the current Arch cloud image, starts it
+with Packer/QEMU, provisions the system, cleans it for reuse, and converts the
+final qcow2 to raw.
 
-```bash
-./build-image.sh -var 'memory=12288' -var 'cpus=6'
-./build-image.sh -var 'disk_size=80G'
-```
-
-The build flow is:
+When it finishes, use one of these files:
 
 ```text
-Arch cloud qcow2
-  -> Packer QEMU VM
-  -> init.sh installs repo files
-  -> nemesis-firstboot provisions the system
-  -> Packer cleans identity/cloud-init/build state
-  -> qcow2 output
-  -> raw conversion
+packer/output/nemesis-cloud/nemesis-cloud.qcow2
+packer/output/nemesis-cloud/nemesis-cloud.raw
 ```
 
-## Outputs
+Use `nemesis-cloud.qcow2` for local QEMU/libvirt/Cockpit. Use
+`nemesis-cloud.raw` for providers that require raw disk uploads.
 
-```text
-packer/output/nemesis-cloud/
-├── nemesis-cloud.qcow2
-└── nemesis-cloud.raw
-```
+## What This Builds
 
-`build-image.sh` prints `qemu-img info` for both images after conversion.
+| Area | What is included |
+|------|------------------|
+| Base OS | Official Arch cloud image, updated during build |
+| Desktop | GNOME, Firefox, LibreOffice, Kitty, Wofi, Thunar |
+| Security tooling | BlackArch repo, selected BlackArch/AUR tools |
+| CLI setup | fish, tmux, Neovim, Catppuccin-style config |
+| Remote access | SSH enabled, GNOME Remote Desktop configured |
+| VM support | VM tools, cloud-init, NetworkManager, systemd-resolved |
+| Secure Boot | Microsoft-signed shim, GRUB, local MOK signing |
+| Storage | Optional file-backed LUKS workspace helper |
+| Output formats | qcow2 and raw |
 
-## Runtime Customization
+The repo contains the project scripts, configs, dotfiles, wallpaper, GNOME theme,
+GRUB theme, and Wofi CSS. Package installs still use the Arch, BlackArch, AUR,
+and GitHub upstreams during the build.
 
-The built image keeps cloud-init installed and cleaned. VM platforms can provide
-instance-specific values at creation time, such as:
+## Default Credentials
 
-| Value | Source |
-|-------|--------|
-| Hostname | cloud-init metadata/user-data |
-| User password | cloud-init user-data or provider UI |
-| Root password | cloud-init user-data or provider UI |
-| SSH keys | cloud-init user-data or provider UI |
-| Desktop service state | cloud-init `runcmd` |
-
-The baked local console account is:
+Local console user:
 
 ```text
 user / Ch4ngeM3!
 ```
 
-The baked GNOME RDP account is:
+GNOME Remote Desktop bootstrap credentials:
 
 ```text
 rdp / rdp
 ```
 
-SSH password login is intentionally disabled. Use SSH keys.
+SSH password login is intentionally disabled. Use SSH keys for SSH.
 
-Example runtime user-data:
+Cloud-init or a provider UI can replace the console user password, root
+password, hostname, and SSH keys when the VM is created.
+
+## Importing The Image
+
+### Cockpit/libvirt
+
+Use the qcow2:
 
 ```text
-examples/user-data.yaml
+packer/output/nemesis-cloud/nemesis-cloud.qcow2
 ```
 
-Enable graphical login and GNOME Remote Desktop on a new VM:
+Create a VM from an existing disk image. Choose UEFI if available. Some Cockpit
+and libvirt installations enable Secure Boot automatically when UEFI is chosen.
+That is expected for this image.
+
+If Cockpit's Automation tab is used, it passes values through cloud-init. With
+Secure Boot enabled, the first boot may stop at MokManager before Linux reaches
+cloud-init. If that happens, Cockpit's temporary cloud-init seed can be missed.
+The baked credentials above still let you log in from the console.
+
+### VPS/cloud providers
+
+Use the raw image if the provider does not accept qcow2:
+
+```text
+packer/output/nemesis-cloud/nemesis-cloud.raw
+```
+
+Compress it before uploading if the provider accepts compressed raw images:
+
+```bash
+zstd -T0 -10 packer/output/nemesis-cloud/nemesis-cloud.raw
+```
+
+Decompress later with:
+
+```bash
+zstd -d nemesis-cloud.raw.zst
+```
+
+## First Boot With Secure Boot
+
+This image uses Microsoft-signed shim and a local Machine Owner Key.
+
+On the first boot with Secure Boot enabled, MokManager should appear. Enroll
+`MOK.cer` from the EFI system partition.
+
+After enrollment and a successful boot, remove these from the EFI system
+partition:
+
+```text
+MOK.cer
+EFI/BOOT/mmx64.efi
+```
+
+A pacman hook re-signs GRUB and the kernel after updates.
+
+## Enabling The Desktop Login
+
+The desktop is installed and themed, but graphical login is disabled by default
+for base-image reuse.
+
+Enable it inside the VM:
+
+```bash
+sudo systemctl enable --now gdm.service gnome-remote-desktop.service
+```
+
+Or enable it with cloud-init when creating the VM:
 
 ```yaml
 #cloud-config
@@ -135,9 +150,58 @@ runcmd:
   - [bash, -lc, "systemctl enable --now gdm.service gnome-remote-desktop.service"]
 ```
 
-## Existing VMs
+There is a small example cloud-init file at:
 
-For an already-created VM, clone this repo and run:
+```text
+examples/user-data.yaml
+```
+
+## Encrypted Workspace
+
+Root disk encryption should be handled before first boot, during image creation
+or provider provisioning. This repo does not repartition and encrypt an already
+running root filesystem.
+
+For a simpler encrypted working area inside the VM:
+
+```bash
+sudo nemesis-workspace init --size 50G
+sudo nemesis-workspace open
+sudo nemesis-workspace close
+```
+
+This creates file-backed LUKS storage for `/opt/workspace`.
+
+## Building With Different Resources
+
+Pass Packer variables through `build-image.sh`:
+
+```bash
+./build-image.sh -var 'memory=12288' -var 'cpus=6'
+./build-image.sh -var 'disk_size=80G'
+```
+
+The default virtual disk size is set in:
+
+```text
+packer/nemesis-cloud.pkr.hcl
+```
+
+## Updating The Image Later
+
+Rebuild from the current Arch cloud image:
+
+```bash
+./build-image.sh
+```
+
+The script overwrites the Packer output directory and regenerates both image
+formats.
+
+## Customizing An Existing VM
+
+If you already have an Arch VM and want to apply this setup manually, clone this
+repo inside that VM and run:
 
 ```bash
 ./init.sh
@@ -154,16 +218,27 @@ Common options:
 ./init.sh --force-config
 ```
 
-`init.sh` installs this repo into `/usr/local/share/nemesis-cloud`, writes
-`/etc/nemesis-cloud.conf`, and runs provisioning with logs at:
+`init.sh` installs the repo into:
+
+```text
+/usr/local/share/nemesis-cloud
+```
+
+and writes:
+
+```text
+/etc/nemesis-cloud.conf
+```
+
+Provisioning logs are written to:
 
 ```text
 /var/log/nemesis-firstboot.log
 ```
 
-## Build Config
+## Build Configuration
 
-`/etc/nemesis-cloud.conf` controls provisioning:
+`/etc/nemesis-cloud.conf` controls the provisioning script:
 
 ```bash
 NEMESIS_USER="user"
@@ -178,67 +253,54 @@ RDP_USER="rdp"
 RDP_PASSWORD="rdp"
 ```
 
-GNOME, theming, RDP configuration, VM tools, BlackArch, AUR/yay, CLI config, and
-shim-signed GRUB are configured during image provisioning. `gdm.service` and
-`gnome-remote-desktop.service` stay disabled unless
-`ENABLE_GRAPHICAL_LOGIN="true"`.
+For the normal Packer image build, this file is written by `init.sh` during the
+build.
 
-## Secure Boot
+## Troubleshooting
 
-The image uses Microsoft-signed shim, GRUB, and a local Machine Owner Key.
-
-On first boot with Secure Boot enabled, MokManager should appear. Enroll
-`MOK.cer` from the EFI system partition. After a successful boot, remove:
-
-```text
-MOK.cer
-EFI/BOOT/mmx64.efi
-```
-
-A pacman hook re-signs GRUB and the kernel after updates.
-
-## Encrypted Workspace
-
-Root LUKS encryption should be done during image build or installation, before
-the first boot into cloud-init.
-
-For a simple encrypted workspace inside the image:
+### Check cloud-init inside a VM
 
 ```bash
-sudo nemesis-workspace init --size 50G
-sudo nemesis-workspace open
-sudo nemesis-workspace close
+sudo cloud-init status --long
+sudo cloud-id
+sudo journalctl -u cloud-init-local -u cloud-init -u cloud-config -u cloud-final --no-pager -b
 ```
 
-This encrypts `/opt/workspace` without changing the root filesystem.
+If cloud-init says `disabled-by-generator` and `no datasource found`, the VM did
+not receive a usable cloud-init datasource.
 
-## Config Assets
+### Check whether a cloud-init seed disk is attached
 
-The repo contains the project scripts, system config, dotfiles, GNOME theme,
-GRUB theme, wallpaper, and Wofi CSS needed for the image configuration.
+Inside the VM:
 
-The build still fetches external OS/package sources:
+```bash
+lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINTS
+sudo blkid
+```
 
-| Source | Purpose |
-|--------|---------|
-| Arch mirrors | Base packages and updates |
-| BlackArch | BlackArch repository and packages |
-| AUR | `yay-bin`, `shim-signed`, GNOME extensions, themes |
-| GitHub/raw URLs | Editor, tmux, fish plugin/theme installs |
+Look for labels such as `cidata`, `CIDATA`, or `config-2`.
 
-## Layout
+### Check image sizes
+
+```bash
+qemu-img info packer/output/nemesis-cloud/nemesis-cloud.qcow2
+ls -lh packer/output/nemesis-cloud/
+```
+
+The raw image is the full virtual disk size. Compress it with `zstd` before
+uploading or archiving.
+
+## Repository Layout
 
 ```text
 .
-├── .github/workflows/        # Manual GitHub Actions image build
-├── archive/cloud-config/     # Older generated cloud-config flow
+├── .github/workflows/        # Optional GitHub Actions build workflow
 ├── assets/                   # Vendored visual assets
-├── docs/                     # Supporting documentation
 ├── examples/                 # Runtime cloud-init examples
 ├── files/                    # System/user config copied into the image
 ├── packer/                   # Packer QEMU template
 ├── scripts/                  # Provisioning and helper scripts
-├── build-image.sh            # Packer wrapper + raw converter
+├── build-image.sh            # Packer wrapper and raw converter
 └── init.sh                   # Local/existing-VM installer
 ```
 
