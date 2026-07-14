@@ -10,12 +10,12 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 360
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Enable KVM
         run: |
@@ -27,10 +27,17 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 qemu-utils xorriso curl unzip awscli
+          sudo apt-get install -y qemu-system-x86 qemu-utils xorriso curl unzip
 
       - name: Install Packer
         uses: hashicorp/setup-packer@v3
+
+      - name: Install AWS CLI
+        run: |
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+          unzip -q /tmp/awscliv2.zip -d /tmp
+          sudo /tmp/aws/install
+          aws --version
 
       - name: Build image
         run: ./build-image.sh
