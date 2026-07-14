@@ -86,7 +86,7 @@ Inside WSL:
 
 ```bash
 pacman -Sy --needed git
-git clone https://github.com/YOURUSER/nemesis-cloud.git
+git clone https://github.com/cinerieus/nemesis-cloud.git
 cd nemesis-cloud
 cp nemesis-cloud.conf.example nemesis-cloud.conf
 vim nemesis-cloud.conf
