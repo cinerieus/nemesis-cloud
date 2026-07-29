@@ -215,6 +215,35 @@ install_aur_package() {
   with_aur_pacman_sudo as_user yay --noconfirm --needed -S "$package"
 }
 
+install_fedora_shim() {
+  local shim_version="16.1-7"
+  local shim_sha256="0a119f3488e5da27ca55c1864ee8e131afa5ecf27689385ba09b805eb00dd608"
+  local shim_url="https://kojipkgs.fedoraproject.org/packages/shim/16.1/7/x86_64/shim-x64-${shim_version}.x86_64.rpm"
+  local work_dir rpm_file shim_file mok_manager_file
+
+  work_dir="$(mktemp -d)"
+  rpm_file="$work_dir/shim-x64.rpm"
+
+  curl_fetch "$shim_url" -o "$rpm_file"
+  printf '%s  %s\n' "$shim_sha256" "$rpm_file" | sha256sum --check --status
+  bsdtar -xf "$rpm_file" -C "$work_dir"
+
+  shim_file="$(find "$work_dir" -type f -path '*/EFI/fedora/shimx64.efi' -print -quit)"
+  mok_manager_file="$(find "$work_dir" -type f -path '*/EFI/fedora/mmx64.efi' -print -quit)"
+  if [[ -z "$shim_file" || -z "$mok_manager_file" ]]; then
+    echo "Fedora shim RPM did not contain the expected EFI binaries" >&2
+    rm -rf "$work_dir"
+    return 1
+  fi
+
+  sbverify --list "$shim_file" >/dev/null
+  sbverify --list "$mok_manager_file" >/dev/null
+
+  install -Dm0644 "$shim_file" /usr/share/shim-signed/shimx64.efi
+  install -Dm0644 "$mok_manager_file" /usr/share/shim-signed/mmx64.efi
+  rm -rf "$work_dir"
+}
+
 configure_aur_helper() {
   log "Configuring AUR helper"
   install_yay
@@ -318,6 +347,7 @@ configure_core_packages() {
     neovim \
     tmux \
     p7zip \
+    libarchive \
     noto-fonts \
     fish \
     less \
@@ -407,7 +437,7 @@ configure_grub_shim_secure_boot() {
     return 0
   fi
 
-  install_aur_package shim-signed
+  install_fedora_shim
 
   cat >/etc/default/grub <<'EOF'
 GRUB_DISTRIBUTOR="Arch Nemesis"
