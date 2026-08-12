@@ -386,6 +386,7 @@ configure_core_packages() {
       cloud-init
       efibootmgr
       grub
+      linux-headers
       mokutil
       sbsigntools
       networkmanager
