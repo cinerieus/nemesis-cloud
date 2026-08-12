@@ -679,8 +679,9 @@ configure_desktop() {
   configure_theme
   configure_rdp
 
+  systemctl set-default graphical.target
   systemctl enable gdm.service
-  systemctl enable gnome-remote-desktop.service
+  systemctl disable gnome-remote-desktop.service || true
 }
 
 configure_theme() {

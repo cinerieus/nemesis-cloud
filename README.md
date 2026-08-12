@@ -134,6 +134,18 @@ GNOME Remote Desktop bootstrap credentials:
 rdp / rdp
 ```
 
+The desktop image boots directly to GDM. GNOME Remote Desktop is installed and
+configured but deliberately disabled so the known bootstrap credentials are not
+exposed automatically. Enable RDP when required:
+
+```bash
+sudo systemctl enable --now gnome-remote-desktop.service
+```
+
+Connect to TCP port `3389` with `rdp / rdp`, then use the normal local account
+at the GNOME login screen. Change the RDP credentials before exposing the
+service to an untrusted network.
+
 SSH password login is intentionally disabled. Use SSH keys for SSH.
 
 Cloud-init or a provider UI can replace the console user password, root
@@ -259,6 +271,13 @@ The default is the minimal variant:
 
 ```bash
 ENABLE_GRAPHICAL_LOGIN="false"
+```
+
+The desktop variant uses `graphical.target` and starts GDM automatically on
+boot. RDP remains disabled by default and can be enabled with:
+
+```bash
+sudo systemctl enable --now gnome-remote-desktop.service
 ```
 
 ## Encrypted Workspace

@@ -133,7 +133,7 @@ build {
 
   provisioner "shell" {
     inline = [
-      "sudo systemctl disable gdm.service gnome-remote-desktop.service || true",
+      "sudo systemctl disable gnome-remote-desktop.service || true",
       "sudo rm -rf /tmp/nemesis-cloud",
       "sudo passwd -l ${var.ssh_username} || true",
       "sudo rm -f /etc/ssh/ssh_host_*",
