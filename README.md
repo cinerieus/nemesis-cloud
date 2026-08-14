@@ -64,7 +64,7 @@ Use `nemesis-cloud.qcow2` for local QEMU/libvirt/Cockpit. Use
 | Area | What is included |
 |------|------------------|
 | Base OS | Official Arch cloud image, updated during build |
-| Desktop | Optional GNOME, Firefox, LibreOffice, Kitty, Wofi, Thunar |
+| Desktop | Optional GNOME, Firefox, LibreOffice, Ghostty, Wofi, Thunar |
 | Security tooling | BlackArch repo, selected BlackArch/AUR tools |
 | CLI setup | fish, tmux, Neovim, Catppuccin-style config |
 | Remote access | SSH enabled, optional GNOME Remote Desktop |

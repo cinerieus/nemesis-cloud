@@ -1,0 +1,21 @@
+# Catppuccin Macchiato with a compact, Kitty-like window layout.
+theme = catppuccin-macchiato.conf
+font-size = 12
+
+window-decoration = auto
+gtk-titlebar = false
+window-padding-x = 4
+window-padding-y = 4
+window-padding-balance = true
+window-padding-color = background
+
+gtk-tabs-location = bottom
+gtk-toolbar-style = flat
+gtk-wide-tabs = false
+window-show-tab-bar = auto
+window-new-tab-position = end
+
+keybind = ctrl+shift+t=new_tab
+keybind = ctrl+shift+w=close_tab:this
+keybind = ctrl+shift+left=previous_tab
+keybind = ctrl+shift+right=next_tab

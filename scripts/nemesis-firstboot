@@ -665,7 +665,7 @@ configure_desktop() {
   fi
 
   log "Installing GNOME desktop"
-  pacman_install gnome vulkan-intel firefox libreoffice kitty thunar wofi pipewire-libcamera glib2-devel dbus imagemagick
+  pacman_install gnome vulkan-intel firefox libreoffice ghostty thunar wofi pipewire-libcamera glib2-devel dbus imagemagick
 
   install_aur_optional \
     gnome-shell-extension-blur-my-shell \
