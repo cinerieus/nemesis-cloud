@@ -24,6 +24,7 @@ Options:
   --repo-ref REF           Repo branch/ref. Default: main
   --enable-desktop-login   Enable GDM and GNOME Remote Desktop services.
   --wsl                   Configure a WSL instance instead of a VM/cloud image.
+  --container             Configure a container image instead of a VM/cloud image.
   --ssh-key KEY            Authorized SSH public key for target user.
   --rdp-user NAME          Initial GNOME RDP user. Default: rdp
   --rdp-password PASSWORD  Initial GNOME RDP password. Default: rdp
@@ -96,6 +97,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --wsl)
       install_profile="wsl"
+      enable_graphical_login="false"
+      rdp_user=""
+      rdp_password=""
+      ssh_authorized_key=""
+      shift
+      ;;
+    --container)
+      install_profile="container"
       enable_graphical_login="false"
       rdp_user=""
       rdp_password=""

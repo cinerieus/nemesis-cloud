@@ -71,7 +71,7 @@ Use `nemesis-cloud.qcow2` for local QEMU/libvirt/Cockpit. Use
 | VM support | VM tools, cloud-init, NetworkManager, systemd-resolved |
 | Secure Boot | Microsoft-signed shim, GRUB, local MOK signing |
 | Storage | Optional file-backed LUKS workspace helper |
-| Output formats | qcow2 and raw |
+| Output formats | qcow2 and raw; optional Docker image on GHCR |
 
 The repo contains the project scripts, configs, dotfiles, wallpaper, GNOME theme,
 GRUB theme, and Wofi CSS. Package installs still use the Arch, BlackArch, AUR,
@@ -119,6 +119,44 @@ wsl --shutdown
 ```
 
 Then reopen the distro. It should start as `NEMESIS_USER`.
+
+## Container Image
+
+The container profile is the minimal (non-desktop) toolset in an Arch
+container. It is not a wrap of the Packer qcow2.
+
+Local build:
+
+```bash
+docker build -t nemesis-cloud:minimal .
+docker run -it --rm nemesis-cloud:minimal
+```
+
+Published image (GitHub Actions, weekly plus manual dispatch):
+
+```bash
+docker pull ghcr.io/cinerieus/nemesis-cloud:minimal
+docker run -it --rm ghcr.io/cinerieus/nemesis-cloud:minimal
+```
+
+Default login inside the image is `user / Ch4ngeM3!` (sudo). Root's password is
+locked.
+
+The container profile:
+
+- creates and configures `NEMESIS_USER`
+- installs BlackArch, `yay`, CLI/security tooling, and shell/editor/tmux config
+- sets up `/opt/workspace` permissions and default ACLs
+- skips GNOME, RDP, cloud-init, bootloader/Secure Boot, VM tools, NetworkManager,
+  SSH server enablement, `hostnamectl`/`timedatectl`, and WSL integration
+
+Build from this repo with:
+
+```bash
+./scripts/install --container
+```
+
+or set `INSTALL_PROFILE="container"` in `nemesis-cloud.conf`.
 
 ## Default Credentials
 
@@ -175,7 +213,7 @@ Common settings:
 | `NEMESIS_USER` | Local console/sudo user baked into the image |
 | `NEMESIS_USER_PASSWORD` | Initial password for that local user |
 | `NEMESIS_HOSTNAME` | Baked hostname; empty generates `DESKTOP-XXXXXXX` |
-| `INSTALL_PROFILE` | `image` for VM/cloud builds, `wsl` for WSL |
+| `INSTALL_PROFILE` | `image` for VM/cloud builds, `wsl` for WSL, `container` for Docker |
 | `ENABLE_GRAPHICAL_LOGIN` | Builds the desktop/RDP variant when `true`; minimal when `false` |
 | `SSH_AUTHORIZED_KEY` | SSH key baked into the local user account |
 | `RDP_USER` / `RDP_PASSWORD` | Initial GNOME Remote Desktop credentials |
@@ -375,7 +413,7 @@ NEMESIS_USER="user"
 NEMESIS_HOSTNAME=""        # Empty generates DESKTOP-XXXXXXX.
 NEMESIS_USER_PASSWORD="Ch4ngeM3!"
 ENABLE_GRAPHICAL_LOGIN="false"
-INSTALL_PROFILE="image"
+INSTALL_PROFILE="image"    # image | wsl | container
 NEMESIS_REPO_URL=""
 NEMESIS_REPO_REF="main"
 SSH_AUTHORIZED_KEY=""
@@ -424,13 +462,14 @@ uploading or archiving.
 
 ```text
 .
-├── .github/workflows/        # Optional GitHub Actions build workflow
+├── .github/workflows/        # VM image and container GitHub Actions workflows
 ├── assets/                   # Vendored visual assets
 ├── files/                    # System/user config copied into the image
 ├── packer/                   # Packer QEMU template
 ├── scripts/                  # Provisioning and helper scripts
+├── Dockerfile                # Minimal Arch container image
 ├── build-image.sh            # Packer wrapper and raw converter
-├── scripts/install           # Local/existing-VM installer
+├── scripts/install           # Local/existing-VM/WSL/container installer
 └── nemesis-cloud.conf.example
 ```
 

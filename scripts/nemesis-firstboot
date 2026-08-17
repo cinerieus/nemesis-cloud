@@ -61,6 +61,14 @@ is_wsl_profile() {
   [[ "$INSTALL_PROFILE" == "wsl" ]]
 }
 
+is_container_profile() {
+  [[ "$INSTALL_PROFILE" == "container" ]]
+}
+
+skips_image_stack() {
+  is_wsl_profile || is_container_profile
+}
+
 resolve_hostname() {
   if [[ -n "${NEMESIS_HOSTNAME}" ]]; then
     printf '%s\n' "$NEMESIS_HOSTNAME"
@@ -73,8 +81,10 @@ resolve_hostname() {
 set_system_hostname() {
   local hostname
   hostname="$(resolve_hostname)"
-  if ! hostnamectl set-hostname "$hostname"; then
-    hostnamectl --transient set-hostname "$hostname" || true
+  if ! is_container_profile; then
+    if ! hostnamectl set-hostname "$hostname"; then
+      hostnamectl --transient set-hostname "$hostname" || true
+    fi
   fi
 
   printf '%s\n' "$hostname" >/etc/hostname 2>/dev/null || true
@@ -151,7 +161,7 @@ install_repo_files() {
   chmod 0644 /etc/systemd/resolved.conf.d/10-nemesis.conf
   chmod 0644 /etc/NetworkManager/conf.d/10-dns-systemd-resolved.conf
   chmod 0644 /etc/NetworkManager/conf.d/20-connectivity.conf
-  if is_wsl_profile; then
+  if skips_image_stack; then
     rm -f /etc/ssh/sshd_config.d/10-nemesis.conf
   fi
   if command -v dconf >/dev/null 2>&1; then
@@ -253,8 +263,12 @@ configure_base() {
   log "Configuring base system"
 
   set_system_hostname
-  timedatectl set-timezone UTC
-  timedatectl set-ntp true
+  if is_container_profile; then
+    ln -sfn /usr/share/zoneinfo/UTC /etc/localtime
+  else
+    timedatectl set-timezone UTC
+    timedatectl set-ntp true
+  fi
 
   cat >/etc/locale.gen <<'EOF'
 C.UTF-8 UTF-8
@@ -283,7 +297,7 @@ EOF
   chmod 2775 /opt/workspace
   setfacl -Rdm g:users:rwx /opt/workspace
 
-  if [[ -n "${SSH_AUTHORIZED_KEY}" && ! is_wsl_profile ]]; then
+  if [[ -n "${SSH_AUTHORIZED_KEY}" ]] && ! skips_image_stack; then
     install -d -m 0750 -o "$NEMESIS_USER" -g "$NEMESIS_USER" "/home/$NEMESIS_USER/.ssh"
     printf '%s\n' "$SSH_AUTHORIZED_KEY" >"/home/$NEMESIS_USER/.ssh/authorized_keys"
     chown "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER/.ssh/authorized_keys"
@@ -294,7 +308,7 @@ EOF
 configure_networking() {
   log "Configuring systemd networking services"
 
-  if is_wsl_profile; then
+  if skips_image_stack; then
     return 0
   fi
 
@@ -381,7 +395,7 @@ configure_core_packages() {
     strace
   )
 
-  if ! is_wsl_profile; then
+  if ! skips_image_stack; then
     packages+=(
       cloud-init
       efibootmgr
@@ -426,7 +440,7 @@ EOF
 }
 
 configure_grub_shim_secure_boot() {
-  if is_wsl_profile; then
+  if skips_image_stack; then
     return 0
   fi
 
@@ -660,7 +674,7 @@ EOF
 }
 
 configure_desktop() {
-  if is_wsl_profile || [[ "${ENABLE_GRAPHICAL_LOGIN}" != "true" ]]; then
+  if skips_image_stack || [[ "${ENABLE_GRAPHICAL_LOGIN}" != "true" ]]; then
     return 0
   fi
 
@@ -812,7 +826,7 @@ patch_shell_theme_accent() {
 }
 
 configure_vm_tools() {
-  if is_wsl_profile; then
+  if skips_image_stack; then
     return 0
   fi
 
@@ -823,7 +837,7 @@ configure_vm_tools() {
 }
 
 configure_rdp() {
-  if is_wsl_profile; then
+  if skips_image_stack; then
     return 0
   fi
 
@@ -877,6 +891,15 @@ EOF
   passwd -l root >/dev/null 2>&1 || true
 }
 
+configure_container() {
+  if ! is_container_profile; then
+    return 0
+  fi
+
+  log "Configuring container profile"
+  passwd -l root >/dev/null 2>&1 || true
+}
+
 main() {
   prepare_repo_assets
   install_repo_files
@@ -890,6 +913,7 @@ main() {
   configure_grub_shim_secure_boot
   configure_cli_customization
   configure_wsl
+  configure_container
   configure_desktop
   configure_vm_tools
 }

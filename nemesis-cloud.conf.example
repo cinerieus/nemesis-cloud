@@ -20,8 +20,9 @@ NEMESIS_HOSTNAME=""
 # Installs GNOME desktop, theming, and GNOME Remote Desktop support when true.
 ENABLE_GRAPHICAL_LOGIN="false"
 
-# image = VM/cloud image profile.
-# wsl   = WSL profile. Skips desktop/RDP/cloud-init/bootloader/VM services.
+# image     = VM/cloud image profile.
+# wsl       = WSL profile. Skips desktop/RDP/cloud-init/bootloader/VM services.
+# container = Docker/OCI profile. Same skips as WSL, plus systemd hostctl calls.
 INSTALL_PROFILE="image"
 
 # Optional public key for the baked local user. Cloud-init/provider keys can
