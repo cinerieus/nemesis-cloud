@@ -418,7 +418,9 @@ configure_core_packages() {
     nuclei \
     subfinder \
     katana-pd \
-    strace
+    strace \
+    openvpn \
+    wireguard-tools
   )
 
   if ! skips_image_stack; then
