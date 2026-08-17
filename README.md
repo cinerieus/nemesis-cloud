@@ -128,15 +128,15 @@ container. It is not a wrap of the Packer qcow2.
 Local build:
 
 ```bash
-docker build -t nemesis-cloud:minimal .
-docker run -it --rm nemesis-cloud:minimal
+docker build -t nemesis .
+docker run -it --rm nemesis
 ```
 
 Published image (GitHub Actions, weekly plus manual dispatch):
 
 ```bash
-docker pull ghcr.io/cinerieus/nemesis-cloud:minimal
-docker run -it --rm ghcr.io/cinerieus/nemesis-cloud:minimal
+docker pull ghcr.io/cinerieus/nemesis
+docker run -it --rm ghcr.io/cinerieus/nemesis
 ```
 
 Default login inside the image is `user / Ch4ngeM3!` (sudo). Root's password is
