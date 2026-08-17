@@ -139,16 +139,16 @@ docker pull ghcr.io/cinerieus/nemesis
 docker run -it --rm ghcr.io/cinerieus/nemesis
 ```
 
-Default login inside the image is `user / Ch4ngeM3!` (sudo). Root's password is
-locked.
+The container starts as root with no baked password and no baked hostname.
+Docker assigns the hostname at runtime.
 
 The container profile:
 
-- creates and configures `NEMESIS_USER`
 - installs BlackArch, `yay`, CLI/security tooling, and shell/editor/tmux config
 - sets up `/opt/workspace` permissions and default ACLs
 - skips GNOME, RDP, cloud-init, bootloader/Secure Boot, VM tools, NetworkManager,
-  SSH server enablement, `hostnamectl`/`timedatectl`, and WSL integration
+  SSH server enablement, hostname/user identity, `hostnamectl`/`timedatectl`,
+  and WSL integration
 
 Build from this repo with:
 

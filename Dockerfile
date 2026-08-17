@@ -2,10 +2,6 @@
 
 FROM archlinux:latest
 
-ARG NEMESIS_USER=user
-ARG NEMESIS_USER_PASSWORD=Ch4ngeM3!
-ARG NEMESIS_HOSTNAME=nemesis
-
 ENV LANG=en_GB.UTF-8
 ENV TERM=xterm-256color
 
@@ -19,10 +15,10 @@ sed -i 's/^CheckSpace/#CheckSpace/' /etc/pacman.conf
 pacman -Sy --noconfirm --needed archlinux-keyring
 pacman -Syu --noconfirm
 
-cat > nemesis-cloud.conf <<CONF
-NEMESIS_USER="${NEMESIS_USER}"
-NEMESIS_USER_PASSWORD="${NEMESIS_USER_PASSWORD}"
-NEMESIS_HOSTNAME="${NEMESIS_HOSTNAME}"
+cat > nemesis-cloud.conf <<'CONF'
+NEMESIS_USER=""
+NEMESIS_USER_PASSWORD=""
+NEMESIS_HOSTNAME=""
 ENABLE_GRAPHICAL_LOGIN="false"
 INSTALL_PROFILE="container"
 SSH_AUTHORIZED_KEY=""
@@ -41,10 +37,8 @@ rm -rf \
   /tmp/* \
   /var/tmp/* \
   /root/.cache \
-  "/home/${NEMESIS_USER}/.cache/yay" \
-  "/home/${NEMESIS_USER}/.cache/go-build"
+  /home/builder/.cache
 EOF
 
-USER ${NEMESIS_USER}
-WORKDIR /home/${NEMESIS_USER}
+WORKDIR /root
 CMD ["fish"]

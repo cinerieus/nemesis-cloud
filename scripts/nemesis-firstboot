@@ -12,8 +12,29 @@ log() {
   printf '\n==> %s\n' "$*"
 }
 
+aur_build_user() {
+  if is_container_profile; then
+    printf 'builder\n'
+  else
+    printf '%s\n' "$NEMESIS_USER"
+  fi
+}
+
+ensure_aur_user() {
+  local u
+  u="$(aur_build_user)"
+  if id "$u" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  useradd -m -G users -s /bin/bash "$u"
+}
+
 as_user() {
-  sudo -Hu "$NEMESIS_USER" "$@"
+  local u
+  u="$(aur_build_user)"
+  ensure_aur_user
+  sudo -Hu "$u" "$@"
 }
 
 pacman_install() {
@@ -80,11 +101,14 @@ resolve_hostname() {
 
 set_system_hostname() {
   local hostname
+
+  if is_container_profile; then
+    return 0
+  fi
+
   hostname="$(resolve_hostname)"
-  if ! is_container_profile; then
-    if ! hostnamectl set-hostname "$hostname"; then
-      hostnamectl --transient set-hostname "$hostname" || true
-    fi
+  if ! hostnamectl set-hostname "$hostname"; then
+    hostnamectl --transient set-hostname "$hostname" || true
   fi
 
   printf '%s\n' "$hostname" >/etc/hostname 2>/dev/null || true
@@ -148,7 +172,7 @@ install_repo_files() {
   install -Dm0755 "$repo_root/scripts/nemesis-gnome-firstlogin" /usr/local/bin/nemesis-gnome-firstlogin
   install -Dm0755 "$repo_root/scripts/nemesis-workspace" /usr/local/bin/nemesis-workspace
 
-  if [[ -d "/home/$NEMESIS_USER" ]]; then
+  if [[ -n "${NEMESIS_USER:-}" && -d "/home/$NEMESIS_USER" ]]; then
     install_tree "$repo_root/files/skel" "/home/$NEMESIS_USER"
     chown -R "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER"
   fi
@@ -186,7 +210,7 @@ with_aur_pacman_sudo() {
   local sudoers_file="/etc/sudoers.d/90-nemesis-aur-pacman"
   local status
 
-  printf '%s ALL=(root) NOPASSWD: /usr/bin/pacman\n' "$NEMESIS_USER" >"$sudoers_file"
+  printf '%s ALL=(root) NOPASSWD: /usr/bin/pacman\n' "$(aur_build_user)" >"$sudoers_file"
   chown root:root "$sudoers_file"
   chmod 0440 "$sudoers_file"
 
@@ -283,13 +307,15 @@ KEYMAP=uk
 FONT=Goha-16
 EOF
 
-  if ! id "$NEMESIS_USER" >/dev/null 2>&1; then
-    useradd -m -G users,wheel -s /bin/bash "$NEMESIS_USER"
-  fi
+  if ! is_container_profile; then
+    if ! id "$NEMESIS_USER" >/dev/null 2>&1; then
+      useradd -m -G users,wheel -s /bin/bash "$NEMESIS_USER"
+    fi
 
-  if [[ -n "${NEMESIS_USER_PASSWORD:-}" ]]; then
-    printf '%s:%s\n' "$NEMESIS_USER" "$NEMESIS_USER_PASSWORD" | chpasswd
-    passwd -u "$NEMESIS_USER" >/dev/null 2>&1 || true
+    if [[ -n "${NEMESIS_USER_PASSWORD:-}" ]]; then
+      printf '%s:%s\n' "$NEMESIS_USER" "$NEMESIS_USER_PASSWORD" | chpasswd
+      passwd -u "$NEMESIS_USER" >/dev/null 2>&1 || true
+    fi
   fi
 
   mkdir -p /opt/workspace
@@ -608,28 +634,56 @@ EOF
 configure_cli_customization() {
   log "Configuring CLI tools"
 
-  install -d -o "$NEMESIS_USER" -g "$NEMESIS_USER" \
-    "/home/$NEMESIS_USER/.cache" \
-    "/home/$NEMESIS_USER/.config" \
-    "/home/$NEMESIS_USER/.local"
-  chown -R "$NEMESIS_USER:$NEMESIS_USER" \
-    "/home/$NEMESIS_USER/.cache" \
-    "/home/$NEMESIS_USER/.config" \
-    "/home/$NEMESIS_USER/.local"
+  if ! is_container_profile; then
+    install -d -o "$NEMESIS_USER" -g "$NEMESIS_USER" \
+      "/home/$NEMESIS_USER/.cache" \
+      "/home/$NEMESIS_USER/.config" \
+      "/home/$NEMESIS_USER/.local"
+    chown -R "$NEMESIS_USER:$NEMESIS_USER" \
+      "/home/$NEMESIS_USER/.cache" \
+      "/home/$NEMESIS_USER/.config" \
+      "/home/$NEMESIS_USER/.local"
 
-  as_user curl --retry 5 --retry-delay 3 --retry-all-errors -fsSL https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim \
-    -o "/home/$NEMESIS_USER/.local/share/nvim/site/autoload/plug.vim" --create-dirs
-  install -d -o "$NEMESIS_USER" -g "$NEMESIS_USER" "/home/$NEMESIS_USER/.cache/nemesis"
-  cat >"/home/$NEMESIS_USER/.cache/nemesis/init-plugin-bootstrap.vim" <<'EOF'
+    as_user curl --retry 5 --retry-delay 3 --retry-all-errors -fsSL https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim \
+      -o "/home/$NEMESIS_USER/.local/share/nvim/site/autoload/plug.vim" --create-dirs
+    install -d -o "$NEMESIS_USER" -g "$NEMESIS_USER" "/home/$NEMESIS_USER/.cache/nemesis"
+    cat >"/home/$NEMESIS_USER/.cache/nemesis/init-plugin-bootstrap.vim" <<'EOF'
 call plug#begin('~/.vim/plugged')
 Plug 'catppuccin/nvim', { 'as': 'catppuccin' }
 Plug 'itchyny/lightline.vim'
 call plug#end()
 EOF
-  chown "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER/.cache/nemesis/init-plugin-bootstrap.vim"
-  as_user nvim -u "/home/$NEMESIS_USER/.cache/nemesis/init-plugin-bootstrap.vim" +PlugInstall +qa || true
-  install -Dm0644 "/home/$NEMESIS_USER/.local/share/nvim/site/autoload/plug.vim" \
-    /root/.local/share/nvim/site/autoload/plug.vim
+    chown "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER/.cache/nemesis/init-plugin-bootstrap.vim"
+    as_user nvim -u "/home/$NEMESIS_USER/.cache/nemesis/init-plugin-bootstrap.vim" +PlugInstall +qa || true
+    as_user git clone https://github.com/tmux-plugins/tpm "/home/$NEMESIS_USER/.tmux/plugins/tpm" || true
+    as_user "/home/$NEMESIS_USER/.tmux/plugins/tpm/scripts/install_plugins.sh" || true
+    as_user curl --retry 5 --retry-delay 3 --retry-all-errors -fsSL https://raw.githubusercontent.com/oh-my-fish/oh-my-fish/master/bin/install \
+      -o "/home/$NEMESIS_USER/install.fish"
+    as_user env \
+      XDG_CACHE_HOME="/home/$NEMESIS_USER/.cache" \
+      XDG_CONFIG_HOME="/home/$NEMESIS_USER/.config" \
+      XDG_DATA_HOME="/home/$NEMESIS_USER/.local/share" \
+      fish "/home/$NEMESIS_USER/install.fish" --noninteractive || true
+    rm -f "/home/$NEMESIS_USER/install.fish"
+    as_user git clone https://github.com/cinerieus/theme-sushi.git \
+      "/home/$NEMESIS_USER/.local/share/omf/themes/sushi" || true
+    as_user env \
+      XDG_CACHE_HOME="/home/$NEMESIS_USER/.cache" \
+      XDG_CONFIG_HOME="/home/$NEMESIS_USER/.config" \
+      XDG_DATA_HOME="/home/$NEMESIS_USER/.local/share" \
+      fish -c "omf theme sushi" || true
+    usermod -s /bin/fish "$NEMESIS_USER"
+  fi
+
+  if [[ -n "${NEMESIS_USER:-}" && -f "/home/$NEMESIS_USER/.local/share/nvim/site/autoload/plug.vim" ]]; then
+    install -Dm0644 "/home/$NEMESIS_USER/.local/share/nvim/site/autoload/plug.vim" \
+      /root/.local/share/nvim/site/autoload/plug.vim
+  else
+    curl_fetch https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim \
+      -o /tmp/plug.vim
+    install -Dm0644 /tmp/plug.vim /root/.local/share/nvim/site/autoload/plug.vim
+    rm -f /tmp/plug.vim
+  fi
   install -d /root/.cache/nemesis
   cat >/root/.cache/nemesis/init-plugin-bootstrap.vim <<'EOF'
 call plug#begin('~/.vim/plugged')
@@ -639,37 +693,22 @@ call plug#end()
 EOF
   nvim -u /root/.cache/nemesis/init-plugin-bootstrap.vim +PlugInstall +qa || true
 
-  as_user git clone https://github.com/tmux-plugins/tpm "/home/$NEMESIS_USER/.tmux/plugins/tpm" || true
-  as_user "/home/$NEMESIS_USER/.tmux/plugins/tpm/scripts/install_plugins.sh" || true
   git clone https://github.com/tmux-plugins/tpm /root/.tmux/plugins/tpm || true
   /root/.tmux/plugins/tpm/scripts/install_plugins.sh || true
 
-  as_user curl --retry 5 --retry-delay 3 --retry-all-errors -fsSL https://raw.githubusercontent.com/oh-my-fish/oh-my-fish/master/bin/install \
-    -o "/home/$NEMESIS_USER/install.fish"
-  as_user env \
-    XDG_CACHE_HOME="/home/$NEMESIS_USER/.cache" \
-    XDG_CONFIG_HOME="/home/$NEMESIS_USER/.config" \
-    XDG_DATA_HOME="/home/$NEMESIS_USER/.local/share" \
-    fish "/home/$NEMESIS_USER/install.fish" --noninteractive || true
-  rm -f "/home/$NEMESIS_USER/install.fish"
-  as_user git clone https://github.com/cinerieus/theme-sushi.git \
-    "/home/$NEMESIS_USER/.local/share/omf/themes/sushi" || true
-  as_user env \
-    XDG_CACHE_HOME="/home/$NEMESIS_USER/.cache" \
-    XDG_CONFIG_HOME="/home/$NEMESIS_USER/.config" \
-    XDG_DATA_HOME="/home/$NEMESIS_USER/.local/share" \
-    fish -c "omf theme sushi" || true
   curl_fetch https://raw.githubusercontent.com/oh-my-fish/oh-my-fish/master/bin/install \
     -o /root/install.fish
   fish /root/install.fish --noninteractive || true
   rm -f /root/install.fish
   mkdir -p /root/.local/share/omf/themes
-  cp -a "/home/$NEMESIS_USER/.local/share/omf/themes/sushi" /root/.local/share/omf/themes/ || true
+  if [[ -n "${NEMESIS_USER:-}" && -d "/home/$NEMESIS_USER/.local/share/omf/themes/sushi" ]]; then
+    cp -a "/home/$NEMESIS_USER/.local/share/omf/themes/sushi" /root/.local/share/omf/themes/ || true
+  else
+    git clone https://github.com/cinerieus/theme-sushi.git /root/.local/share/omf/themes/sushi || true
+  fi
   fish -c "omf theme sushi" || true
 
-  usermod -s /bin/fish "$NEMESIS_USER"
   usermod -s /bin/fish root
-
   install_noto_nerd_font
 }
 
@@ -897,7 +936,6 @@ configure_container() {
   fi
 
   log "Configuring container profile"
-  passwd -l root >/dev/null 2>&1 || true
 }
 
 main() {

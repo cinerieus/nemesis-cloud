@@ -106,6 +106,9 @@ while [[ $# -gt 0 ]]; do
     --container)
       install_profile="container"
       enable_graphical_login="false"
+      nemesis_user=""
+      nemesis_user_password=""
+      nemesis_hostname=""
       rdp_user=""
       rdp_password=""
       ssh_authorized_key=""
