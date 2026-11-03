@@ -120,6 +120,31 @@ wsl --shutdown
 
 Then reopen the distro. It should start as `NEMESIS_USER`.
 
+## Existing Arch VPS setup
+
+On a running Arch Linux VPS, clone the repo and run:
+
+```bash
+pacman -Sy --needed git
+git clone https://github.com/cinerieus/nemesis-cloud.git
+cd nemesis-cloud
+./scripts/install --vps --user YOUR_USER
+```
+
+`YOUR_USER` can be an existing account or a new one. If running through `sudo`,
+`--vps` uses `SUDO_USER` when no other user is configured. To give a new account
+sudo access, pass `--password 'YOUR_PASSWORD'`; for SSH access, pass
+`--ssh-key 'ssh-ed25519 ...'`. Existing accounts must use `/home/YOUR_USER`.
+The VPS profile keeps existing
+user passwords, authorized keys, login shells, SSH settings, hostname, DNS,
+network services, cloud-init, and bootloader settings. It does not lock root or
+enable SSH. It installs the CLI/security toolset and applies the repo's shell,
+editor, and tmux config to the selected user and root. Existing account
+passwords are left alone even if one is supplied in the config.
+
+If `/etc/nemesis-cloud.conf` already exists with another profile, review it and
+rerun with `--force-config` to select VPS mode.
+
 ## Container Image
 
 The container profile is the minimal (non-desktop) toolset in an Arch
@@ -213,7 +238,7 @@ Common settings:
 | `NEMESIS_USER` | Local console/sudo user baked into the image |
 | `NEMESIS_USER_PASSWORD` | Initial password for that local user |
 | `NEMESIS_HOSTNAME` | Baked hostname; empty generates `DESKTOP-XXXXXXX` |
-| `INSTALL_PROFILE` | `image` for VM/cloud builds, `wsl` for WSL, `container` for Docker |
+| `INSTALL_PROFILE` | `image` for VM/cloud builds, `wsl` for WSL, `vps` for existing Arch VPS, `container` for Docker |
 | `ENABLE_GRAPHICAL_LOGIN` | Builds the desktop/RDP variant when `true`; minimal when `false` |
 | `SSH_AUTHORIZED_KEY` | SSH key baked into the local user account |
 | `RDP_USER` / `RDP_PASSWORD` | Initial GNOME Remote Desktop credentials |
@@ -413,7 +438,7 @@ NEMESIS_USER="user"
 NEMESIS_HOSTNAME=""        # Empty generates DESKTOP-XXXXXXX.
 NEMESIS_USER_PASSWORD="Ch4ngeM3!"
 ENABLE_GRAPHICAL_LOGIN="false"
-INSTALL_PROFILE="image"    # image | wsl | container
+INSTALL_PROFILE="image"    # image | wsl | vps | container
 NEMESIS_REPO_URL=""
 NEMESIS_REPO_REF="main"
 SSH_AUTHORIZED_KEY=""

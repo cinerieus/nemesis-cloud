@@ -82,12 +82,16 @@ is_wsl_profile() {
   [[ "$INSTALL_PROFILE" == "wsl" ]]
 }
 
+is_vps_profile() {
+  [[ "$INSTALL_PROFILE" == "vps" ]]
+}
+
 is_container_profile() {
   [[ "$INSTALL_PROFILE" == "container" ]]
 }
 
 skips_image_stack() {
-  is_wsl_profile || is_container_profile
+  is_wsl_profile || is_vps_profile || is_container_profile
 }
 
 resolve_hostname() {
@@ -166,26 +170,39 @@ install_asset() {
 install_repo_files() {
   log "Installing repo-backed configuration files"
 
-  install_tree "$repo_root/files/etc" /etc
+  if is_vps_profile; then
+    if [[ ! -e /etc/sudoers.d/10-wheel ]]; then
+      install -Dm0440 "$repo_root/files/etc/sudoers.d/10-wheel" /etc/sudoers.d/10-wheel
+    fi
+  else
+    install_tree "$repo_root/files/etc" /etc
+  fi
   install_tree "$repo_root/files/skel" /etc/skel
 
   install -Dm0755 "$repo_root/scripts/nemesis-gnome-firstlogin" /usr/local/bin/nemesis-gnome-firstlogin
   install -Dm0755 "$repo_root/scripts/nemesis-workspace" /usr/local/bin/nemesis-workspace
 
   if [[ -n "${NEMESIS_USER:-}" && -d "/home/$NEMESIS_USER" ]]; then
-    install_tree "$repo_root/files/skel" "/home/$NEMESIS_USER"
-    chown -R "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER"
+    if is_vps_profile; then
+      sudo -Hu "$NEMESIS_USER" cp -a --no-preserve=ownership \
+        "$repo_root/files/skel/." "/home/$NEMESIS_USER/."
+    else
+      install_tree "$repo_root/files/skel" "/home/$NEMESIS_USER"
+      chown -R "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER"
+    fi
   fi
 
   install_tree "$repo_root/files/skel" /root
 
-  chmod 0440 /etc/sudoers.d/10-wheel
-  chown root:root /etc/sudoers.d
-  chown root:root /etc/sudoers.d/10-wheel
-  chmod 0644 /etc/systemd/resolved.conf.d/10-nemesis.conf
-  chmod 0644 /etc/NetworkManager/conf.d/10-dns-systemd-resolved.conf
-  chmod 0644 /etc/NetworkManager/conf.d/20-connectivity.conf
-  if skips_image_stack; then
+  if ! is_vps_profile; then
+    chmod 0440 /etc/sudoers.d/10-wheel
+    chown root:root /etc/sudoers.d
+    chown root:root /etc/sudoers.d/10-wheel
+    chmod 0644 /etc/systemd/resolved.conf.d/10-nemesis.conf
+    chmod 0644 /etc/NetworkManager/conf.d/10-dns-systemd-resolved.conf
+    chmod 0644 /etc/NetworkManager/conf.d/20-connectivity.conf
+  fi
+  if skips_image_stack && ! is_vps_profile; then
     rm -f /etc/ssh/sshd_config.d/10-nemesis.conf
   fi
   if command -v dconf >/dev/null 2>&1; then
@@ -285,34 +302,40 @@ configure_aur_helper() {
 
 configure_base() {
   log "Configuring base system"
+  local user_existed="false"
 
-  set_system_hostname
-  if is_container_profile; then
-    ln -sfn /usr/share/zoneinfo/UTC /etc/localtime
-  else
-    timedatectl set-timezone UTC
-    timedatectl set-ntp true
-  fi
+  if ! is_vps_profile; then
+    set_system_hostname
+    if is_container_profile; then
+      ln -sfn /usr/share/zoneinfo/UTC /etc/localtime
+    else
+      timedatectl set-timezone UTC
+      timedatectl set-ntp true
+    fi
 
-  cat >/etc/locale.gen <<'EOF'
+    cat >/etc/locale.gen <<'EOF'
 C.UTF-8 UTF-8
 en_US.UTF-8 UTF-8
 en_GB.UTF-8 UTF-8
 EOF
-  locale-gen
-  printf 'LANG=en_GB.UTF-8\n' >/etc/locale.conf
-  export LANG=en_GB.UTF-8
-  cat >/etc/vconsole.conf <<'EOF'
+    locale-gen
+    printf 'LANG=en_GB.UTF-8\n' >/etc/locale.conf
+    export LANG=en_GB.UTF-8
+    cat >/etc/vconsole.conf <<'EOF'
 KEYMAP=uk
 FONT=Goha-16
 EOF
+  fi
 
   if ! is_container_profile; then
-    if ! id "$NEMESIS_USER" >/dev/null 2>&1; then
+    if id "$NEMESIS_USER" >/dev/null 2>&1; then
+      user_existed="true"
+    else
       useradd -m -G users,wheel -s /bin/bash "$NEMESIS_USER"
     fi
 
-    if [[ -n "${NEMESIS_USER_PASSWORD:-}" ]]; then
+    if [[ -n "${NEMESIS_USER_PASSWORD:-}" ]] &&
+      { ! is_vps_profile || [[ "$user_existed" == "false" ]]; }; then
       printf '%s:%s\n' "$NEMESIS_USER" "$NEMESIS_USER_PASSWORD" | chpasswd
       passwd -u "$NEMESIS_USER" >/dev/null 2>&1 || true
     fi
@@ -323,9 +346,16 @@ EOF
   chmod 2775 /opt/workspace
   setfacl -Rdm g:users:rwx /opt/workspace
 
-  if [[ -n "${SSH_AUTHORIZED_KEY}" ]] && ! skips_image_stack; then
+  if [[ -n "${SSH_AUTHORIZED_KEY}" ]] && { is_vps_profile || ! skips_image_stack; }; then
     install -d -m 0750 -o "$NEMESIS_USER" -g "$NEMESIS_USER" "/home/$NEMESIS_USER/.ssh"
-    printf '%s\n' "$SSH_AUTHORIZED_KEY" >"/home/$NEMESIS_USER/.ssh/authorized_keys"
+    if is_vps_profile; then
+      touch "/home/$NEMESIS_USER/.ssh/authorized_keys"
+      if ! grep -Fxq -- "$SSH_AUTHORIZED_KEY" "/home/$NEMESIS_USER/.ssh/authorized_keys"; then
+        printf '%s\n' "$SSH_AUTHORIZED_KEY" >>"/home/$NEMESIS_USER/.ssh/authorized_keys"
+      fi
+    else
+      printf '%s\n' "$SSH_AUTHORIZED_KEY" >"/home/$NEMESIS_USER/.ssh/authorized_keys"
+    fi
     chown "$NEMESIS_USER:$NEMESIS_USER" "/home/$NEMESIS_USER/.ssh/authorized_keys"
     chmod 0600 "/home/$NEMESIS_USER/.ssh/authorized_keys"
   fi
@@ -641,10 +671,12 @@ configure_cli_customization() {
       "/home/$NEMESIS_USER/.cache" \
       "/home/$NEMESIS_USER/.config" \
       "/home/$NEMESIS_USER/.local"
-    chown -R "$NEMESIS_USER:$NEMESIS_USER" \
-      "/home/$NEMESIS_USER/.cache" \
-      "/home/$NEMESIS_USER/.config" \
-      "/home/$NEMESIS_USER/.local"
+    if ! is_vps_profile; then
+      chown -R "$NEMESIS_USER:$NEMESIS_USER" \
+        "/home/$NEMESIS_USER/.cache" \
+        "/home/$NEMESIS_USER/.config" \
+        "/home/$NEMESIS_USER/.local"
+    fi
 
     as_user curl --retry 5 --retry-delay 3 --retry-all-errors -fsSL https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim \
       -o "/home/$NEMESIS_USER/.local/share/nvim/site/autoload/plug.vim" --create-dirs
@@ -674,7 +706,9 @@ EOF
       XDG_CONFIG_HOME="/home/$NEMESIS_USER/.config" \
       XDG_DATA_HOME="/home/$NEMESIS_USER/.local/share" \
       fish -c "omf theme sushi" || true
-    usermod -s /bin/fish "$NEMESIS_USER"
+    if ! is_vps_profile; then
+      usermod -s /bin/fish "$NEMESIS_USER"
+    fi
   fi
 
   if [[ -n "${NEMESIS_USER:-}" && -f "/home/$NEMESIS_USER/.local/share/nvim/site/autoload/plug.vim" ]]; then
@@ -710,7 +744,9 @@ EOF
   fi
   fish -c "omf theme sushi" || true
 
-  usermod -s /bin/fish root
+  if ! is_vps_profile; then
+    usermod -s /bin/fish root
+  fi
   install_noto_nerd_font
 }
 
@@ -942,8 +978,13 @@ configure_container() {
 
 main() {
   prepare_repo_assets
-  install_repo_files
-  configure_bootstrap_packages
+  if is_vps_profile; then
+    configure_bootstrap_packages
+    install_repo_files
+  else
+    install_repo_files
+    configure_bootstrap_packages
+  fi
   configure_base
   configure_repos
   configure_core_packages

@@ -22,6 +22,7 @@ ENABLE_GRAPHICAL_LOGIN="false"
 
 # image     = VM/cloud image profile.
 # wsl       = WSL profile. Skips desktop/RDP/cloud-init/bootloader/VM services.
+# vps       = Existing Arch VPS. Keeps provider networking, boot, SSH, and account settings.
 # container = Docker/OCI profile. Same skips as WSL, plus systemd hostctl calls.
 INSTALL_PROFILE="image"
 

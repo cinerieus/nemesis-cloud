@@ -24,6 +24,7 @@ Options:
   --repo-ref REF           Repo branch/ref. Default: main
   --enable-desktop-login   Enable GDM and GNOME Remote Desktop services.
   --wsl                   Configure a WSL instance instead of a VM/cloud image.
+  --vps                   Configure an existing Arch VPS without changing boot or networking.
   --container             Configure a container image instead of a VM/cloud image.
   --ssh-key KEY            Authorized SSH public key for target user.
   --rdp-user NAME          Initial GNOME RDP user. Default: rdp
@@ -103,6 +104,14 @@ while [[ $# -gt 0 ]]; do
       ssh_authorized_key=""
       shift
       ;;
+    --vps)
+      install_profile="vps"
+      enable_graphical_login="false"
+      if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" && "$nemesis_user" == "user" ]]; then
+        nemesis_user="$SUDO_USER"
+      fi
+      shift
+      ;;
     --container)
       install_profile="container"
       enable_graphical_login="false"
@@ -146,12 +155,41 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$install_profile" == "vps" && "$nemesis_user_password" == "Ch4ngeM3!" ]]; then
+  nemesis_user_password=""
+fi
+
+if [[ "$install_profile" == "vps" ]]; then
+  if [[ -z "$nemesis_user" || "$nemesis_user" == "root" ]]; then
+    echo "The VPS profile requires a non-root user. Pass --user NAME." >&2
+    exit 2
+  fi
+  if id "$nemesis_user" >/dev/null 2>&1; then
+    existing_home="$(getent passwd "$nemesis_user" | cut -d: -f6)"
+    if [[ "$existing_home" != "/home/$nemesis_user" ]]; then
+      echo "The VPS profile requires $nemesis_user to use /home/$nemesis_user (found $existing_home)." >&2
+      exit 2
+    fi
+  elif [[ -z "$nemesis_user_password" ]]; then
+    echo "A new VPS user needs --password PASSWORD for sudo access." >&2
+    exit 2
+  fi
+fi
+
 quote_shell() {
   printf "%q" "$1"
 }
 
 write_config() {
   if [[ -f "$config_file" && "$force_config" != "true" ]]; then
+    if [[ "$install_profile" == "vps" ]]; then
+      local existing_profile
+      existing_profile="$(sed -n 's/^INSTALL_PROFILE=//p' "$config_file" | tail -n 1)"
+      if [[ "$existing_profile" != "vps" ]]; then
+        echo "Existing $config_file does not select the VPS profile. Review it, then use --force-config." >&2
+        return 1
+      fi
+    fi
     echo "Keeping existing $config_file. Use --force-config to overwrite it."
     return 0
   fi
